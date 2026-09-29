@@ -1,0 +1,204 @@
+import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import {
+  createSession, dispatch, GameError, playerView, previewJoin, readSource, trainingView,
+  type Command, type Ctx, type Language, type OrgId, type SessionState, type StartMode,
+} from '@bdi/domain'
+
+export interface Store {
+  run<T>(fn: (db: { get: (id: string) => SessionState | null; byCode: (code: string) => SessionState | null; save: (s: SessionState) => void; list: () => SessionState[] }) => T): Promise<T>
+}
+
+export class MemoryStore implements Store {
+  private sessions = new Map<string, SessionState>()
+  private chain: Promise<unknown> = Promise.resolve()
+  private file = process.env.GAME_FILE
+  onFlush: ((sessions: SessionState[]) => Promise<void>) | null = null
+  replaceAll(sessions: SessionState[]) {
+    this.sessions = new Map(sessions.map((session) => [session.id, session]))
+  }
+  constructor() {
+    if (!this.file) return
+    try {
+      const parsed = JSON.parse(readFileSync(this.file, 'utf8')) as SessionState[]
+      for (const session of parsed) this.sessions.set(session.id, session)
+    } catch {
+      /* first run */
+    }
+  }
+  private flush() {
+    if (!this.file) return
+    mkdirSync(this.file.replace(/[\\/][^\\/]+$/, ''), { recursive: true })
+    writeFileSync(this.file, JSON.stringify([...this.sessions.values()]))
+  }
+  async run<T>(fn: (db: { get: (id: string) => SessionState | null; byCode: (code: string) => SessionState | null; save: (s: SessionState) => void; list: () => SessionState[] }) => T): Promise<T> {
+    const run = this.chain.then(async () => {
+      const dirty = new Map<string, SessionState>()
+      const db = {
+        get: (id: string) => dirty.get(id) ?? (this.sessions.get(id) ? structuredClone(this.sessions.get(id)!) : null),
+        byCode: (code: string) => {
+          const found = [...dirty.values(), ...this.sessions.values()].find((s) => s.code === code.toUpperCase())
+          return found ? structuredClone(dirty.get(found.id) ?? found) : null
+        },
+        save: (s: SessionState) => { dirty.set(s.id, s) },
+        list: () => [...this.sessions.values()].map((s) => structuredClone(s)),
+      }
+      const result = await fn(db)
+      for (const [id, session] of dirty) this.sessions.set(id, session)
+      this.flush()
+      if (this.onFlush && dirty.size > 0) await this.onFlush([...dirty.values()])
+      return result
+    })
+    this.chain = run.then(() => undefined, () => undefined)
+    return run
+  }
+}
+
+export function devAuthAllowed(): boolean {
+  if (process.env.ALLOW_DEV_AUTH === 'true') return true
+  if (process.env.ALLOW_DEV_AUTH === 'false') return false
+  return process.env.NODE_ENV !== 'production' && !process.env.SUPABASE_URL
+}
+
+const secret = () => {
+  if (process.env.AUTH_SECRET) return process.env.AUTH_SECRET
+  if (process.env.NODE_ENV === 'production' || process.env.ALLOW_DEV_AUTH === 'true') {
+    throw new GameError('server', 'AUTH_SECRET ontbreekt.', 500)
+  }
+  return 'dev-only-secret-change-me'
+}
+
+export function signDev(userId: string): string {
+  const mac = createHmac('sha256', secret()).update(userId).digest('base64url')
+  return `dev.${userId}.${mac}`
+}
+
+export async function userFromAuth(header: string | undefined): Promise<string> {
+  if (!header?.startsWith('Bearer ')) throw new GameError('unauthorized', 'Log in om mee te doen.', 401)
+  const token = header.slice(7)
+  if (token.startsWith('dev.')) {
+    if (!devAuthAllowed()) throw new GameError('unauthorized', 'Dev-login is uit.', 401)
+    const [, userId, mac] = token.split('.')
+    const expected = createHmac('sha256', secret()).update(userId).digest('base64url')
+    const a = Buffer.from(mac)
+    const b = Buffer.from(expected)
+    if (a.length !== b.length || !timingSafeEqual(a, b)) throw new GameError('unauthorized', 'Ongeldige identiteit.', 401)
+    return userId
+  }
+  if (process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY) {
+    const response = await fetch(`${process.env.SUPABASE_URL}/auth/v1/user`, {
+      headers: { authorization: `Bearer ${token}`, apikey: process.env.SUPABASE_ANON_KEY },
+    })
+    if (!response.ok) throw new GameError('unauthorized', 'Supabase-login is ongeldig.', 401)
+    const body = await response.json() as { id?: string }
+    if (!body.id) throw new GameError('unauthorized', 'Supabase-login mist een gebruiker.', 401)
+    return body.id
+  }
+  throw new GameError('unauthorized', 'Gebruik anonieme Supabase-login of dev-login.', 401)
+}
+
+function runtime(language: Language, now = new Date().toISOString()): Ctx {
+  return {
+    now,
+    language,
+    presentationMs: Number(process.env.PRESENTATION_MS ?? 3000),
+    pipelineMs: Number(process.env.PIPELINE_MS ?? 1000),
+    animationMs: Number(process.env.ANIMATION_MS ?? 4000),
+    graceMs: Number(process.env.GRACE_MS ?? 30000),
+  }
+}
+
+function code(): string {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+  return Array.from(randomBytes(6), (b) => alphabet[b % alphabet.length]).join('')
+}
+
+export class GameService {
+  constructor(private store: Store) {}
+  private async apply(sessionId: string, userId: string, command: Command, language?: Language) {
+    return this.store.run((db) => {
+      const session = db.get(sessionId)
+      if (!session) throw new GameError('not_found', 'Sessie niet gevonden.', 404)
+      const result = dispatch(session, command, runtime(language ?? session.language))
+      db.save(result.state)
+      return result
+    })
+  }
+  async anonymous() {
+    if (!devAuthAllowed()) throw new GameError('not_found', 'Dev-login is uit.', 404)
+    const userId = randomUUID()
+    return { userId, token: signDev(userId) }
+  }
+  async create(userId: string, input: { name?: string; language?: Language; startMode?: StartMode }) {
+    const now = new Date()
+    const invites = Object.fromEntries(['buyer', 'seller', 'carrier', 'delivery'].map((org) => [org, randomUUID()])) as Record<OrgId, string>
+    const state = createSession({
+      id: randomUUID(),
+      code: code(),
+      hostUserId: userId,
+      name: input.name?.slice(0, 40) || 'BDI Game',
+      language: input.language ?? 'nl',
+      startMode: input.startMode ?? 'without_bdi',
+      now: now.toISOString(),
+      expiresAt: new Date(now.getTime() + Number(process.env.SESSION_TTL_HOURS ?? 24) * 3600_000).toISOString(),
+      invites,
+    })
+    await this.store.run((db) => { db.save(state); return state })
+    return trainingView(state)
+  }
+  async command(sessionId: string, userId: string, command: Command) {
+    const result = await this.apply(sessionId, userId, command)
+    return { output: result.output, training: result.state.hostUserId === userId ? trainingView(result.state) : undefined, player: playerView(result.state, userId, new Date().toISOString()) }
+  }
+  async training(sessionId: string, userId: string) {
+    return this.store.run((db) => {
+      const session = db.get(sessionId)
+      if (!session) throw new GameError('not_found', 'Sessie niet gevonden.', 404)
+      if (session.hostUserId !== userId) throw new GameError('forbidden', 'Geen toegang tot het trainingsoverzicht.', 403)
+      return trainingView(session)
+    })
+  }
+  async player(sessionId: string, userId: string) {
+    return this.store.run((db) => {
+      const session = db.get(sessionId)
+      if (!session) throw new GameError('not_found', 'Sessie niet gevonden.', 404)
+      const view = playerView(session, userId, new Date().toISOString())
+      if (!view) throw new GameError('forbidden', 'Geen rol in deze sessie.', 403)
+      return view
+    })
+  }
+  async joinPreview(codeValue: string) {
+    return this.store.run((db) => {
+      const session = db.byCode(codeValue)
+      if (!session || session.status === 'closed') throw new GameError('not_found', 'Sessie niet gevonden.', 404)
+      return { sessionId: session.id, ...previewJoin(session) }
+    })
+  }
+  async read(sessionId: string, userId: string, ref: string) {
+    return this.store.run((db) => {
+      const session = db.get(sessionId)
+      if (!session) throw new GameError('not_found', 'Sessie niet gevonden.', 404)
+      const role = session.roles.find((item) => item.playerUserId === userId)
+      if (!role) throw new GameError('forbidden', 'Geen rol.', 403)
+      const round = session.rounds.find((item) => item.id === session.currentRoundId)
+      if (!round) throw new GameError('not_found', 'Geen ronde.', 404)
+      const payload = readSource(round, role.organizationId, ref)
+      if (!payload) throw new GameError('forbidden', 'Geen leesrecht op deze bron.', 403)
+      return payload
+    })
+  }
+  async tickAll() {
+    await this.store.run((db) => {
+      for (const session of db.list()) {
+        if (session.status === 'closed') continue
+        try {
+          const result = dispatch(session, { type: 'tick' }, runtime(session.language))
+          db.save(result.state)
+        } catch {
+          /* expired sessions stop on the next claim */
+        }
+      }
+      return null
+    })
+  }
+}

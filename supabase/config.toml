@@ -1,0 +1,21 @@
+project_id = "bdi-game-mobile"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+
+[db]
+port = 54322
+major_version = 15
+
+[auth]
+enable_anonymous_sign_ins = true
+site_url = "http://localhost:5173"
+
+[auth.anonymous]
+enabled = true
+
+[realtime]
+enabled = true

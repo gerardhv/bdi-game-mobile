@@ -1,0 +1,6 @@
+{
+  "buildCommand": "npm run build -w @bdi/web",
+  "outputDirectory": "apps/web/dist",
+  "ignoreCommand": "git diff --quiet HEAD^ HEAD -- apps/web package.json package-lock.json vercel.json",
+  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+}

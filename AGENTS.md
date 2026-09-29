@@ -1,0 +1,123 @@
+# AGENTS.md
+
+Guidance for AI coding agents working in this repository. Human-facing docs are in Dutch under `docs/`; this file is the technical entry point for agents.
+
+## What this is
+
+An educational multiplayer game about data sharing in a logistics chain, played twice: without BDI and with BDI (notifications plus authorized reads at the source). One host screen (beamer) and four phones, one per role: `buyer`, `seller`, `carrier`, `delivery`. All organisations and data are fictional.
+
+Read before changing behaviour:
+
+- `docs/gameplay.md`: steps S00–S20, rounds, the traffic jam.
+- `docs/bdi-model.md`: what BDI means in this game (membership ≠ read right, policy checked on every read).
+- `docs/architecture.md`: storage, realtime, clock, identity.
+- `docs/design-decisions.md`: deliberate deviations from the spec. Add new ones here.
+- `docs/remake-prompt.md`: the original functional spec (Dutch). It is gitignored, so it may be absent; if present it is leading for game rules.
+
+## Commands
+
+```bash
+npm install
+npm run dev:api        # API on :8787 (tsx watch)
+npm run dev            # web on :5173, proxies /api and /health to :8787
+npm run typecheck      # domain, API and web
+npm test               # Vitest: packages/**/*.test.ts, services/**/*.test.ts
+npm run test:e2e       # Playwright, ~6 min, starts API and web itself
+npm run check:bundle   # build web and fail on secrets in the bundle
+```
+
+The shell on the maintainer's machine is PowerShell on Windows. Nothing loads `.env` files; set env vars in the shell (`$env:NAME = "value"`). All variables are listed in `.env.example`.
+
+Definition of done for a change: `npm run typecheck` and `npm test` pass. Run `npm run test:e2e` when you touch game flow, the host screen, the phone screen or anything with a `data-testid`. Update the Dutch docs in `docs/` when behaviour, configuration or deployment changes.
+
+## Layout
+
+| Path | Role |
+| --- | --- |
+| `packages/domain` | All game rules. Pure TypeScript, no I/O. Imported as `@bdi/domain` (source, no build step). |
+| `services/game-api` | Hono HTTP server on Node. Auth, persistence, SSE, 500 ms tick loop. |
+| `apps/web` | React 19 + Vite SPA with a hash router. Host screens in `src/host`, phone screens in `src/phone`. |
+| `e2e` | Playwright acceptance tests; one browser context per role. |
+| `scripts` | Local helpers (`seed-session.mjs`, `open-sessions.mjs`, `check-bundle.mjs`). |
+| `supabase` | Local Supabase config and the `session_documents` migration. |
+| `render.yaml`, `vercel.json` | Cloud config: API on Render, web on Vercel. See `docs/deployment.md`. |
+
+### Domain (`packages/domain/src`)
+
+- `types.ts`: `SessionState` (one document per session), `RoundState`, `GameError`, `STEPS`, `ORGS`.
+- `dispatch.ts`: `dispatch(session, command, ctx)` is the single reducer; `Command` is the union of all commands. `createSession`, `blankRound`, `readSource`.
+- `steps.ts`: per-step actor (`STEP_ACTOR`), coarse state (`COARSE`), prompts, options, expected answers, `nextStepId` (S02 only exists with BDI).
+- `policy.ts`: `POLICY_RULES`, `authorize`, `minimalPayload`, subscriptions, and `t(language, nl, en)` for bilingual strings.
+- `project.ts`: BDI pipeline (publish → outbox → notify → fetch), knowledge panels, frames.
+- `views.ts`: `trainingView` (host only) and `playerView` (one role). These are the only shapes that leave the server.
+- `scenario.ts`: fictional data (products, drivers, ETAs, times).
+
+### API (`services/game-api/src`)
+
+- `index.ts`: boot, optional Postgres, `setInterval(tickAll, 500)`.
+- `app.ts`: routes. Every mutating route maps to exactly one domain `Command`.
+- `service.ts`: `MemoryStore` (serialized `run()` transactions on cloned documents), dev-token signing, Supabase token check, `GameService`.
+- `postgres.ts`: loads all sessions at boot and upserts dirty ones after each transaction.
+
+## Invariants — do not break these
+
+1. **The domain is deterministic.** No `Date.now()`, `new Date()`, `Math.random()`, `randomUUID()` or `process.env` inside `packages/domain` (the default argument in `trainingView` is the only exception). Time comes from `ctx.now`; ids and seeds are generated in the API and passed in the command. Shuffling uses `shuffle(items, seed)`.
+2. **`dispatch` returns a new state.** It `structuredClone`s the input; never mutate a session outside `store.run()`.
+3. **Identity comes from the token, never from the body.** Routes set `userId` from `userFromAuth(...)`. Build commands field by field; do not spread `c.req.json()` into a command.
+4. **No answer leaks to players.** `playerView` exposes only the player's own sources and, in the BDI round, authorized received data. Never add `scenarioSeed`, expected values or other roles' sources to a player view. `trainingView` is host-only (checked in `GameService.training`) and must not expose invite tokens of claimed roles.
+5. **BDI rules live in `policy.ts`.** Every read goes through `authorize` at the source; being a member or having a transport role is not a read right. Notifications carry minimal metadata; payloads are fetched separately.
+6. **Server time drives everything.** The client animates from `phaseEnteredAt`, `dueAt` and `serverNow`; it never advances the game itself. Pausing shifts all deadlines so pause time is not counted as decision time.
+7. **One API instance.** Memory is the source of truth; Postgres is a write-behind copy loaded at boot. Do not introduce designs that assume multiple instances or serverless functions without redesigning storage first.
+8. **Secrets stay server-side.** Only `VITE_*` variables reach the browser. Never put `AUTH_SECRET`, `INTERNAL_TICK_SECRET` or a Supabase `service_role` key in a `VITE_*` variable; `check:bundle` guards this.
+
+## Common changes
+
+**New player or host action**
+
+1. Add a variant to `Command` in `dispatch.ts`, a `case` in `dispatch`, and a handler function.
+2. Decide whether it is allowed while paused (list at the top of `dispatch`).
+3. Add a route in `app.ts` that sets `type` and `userId` itself and picks body fields explicitly.
+4. Call it from the web app through `api(...)` in `apps/web/src/api.ts`.
+5. Add a domain test in `round.test.ts` (and an API test in `app.test.ts` for auth or isolation rules).
+
+**Changing what a screen shows**
+
+The web app does not import `@bdi/domain`. Its view types in `apps/web/src/types.ts` are a hand-maintained mirror of `TrainingView` and `PlayerView` in `views.ts`. Change both, then run `npm run typecheck`.
+
+**Changing step flow or scenario data**
+
+Edit `steps.ts` and `scenario.ts`. Check `nextStepId`, `STEP_ACTOR`, `COARSE`, `CONFIRM`/`CHOOSE`, and the mirrored `CONFIRM_STEPS` in `apps/web/src/types.ts`. The e2e helper plays by trying options per role, so it survives answer reshuffles, but it relies on test ids.
+
+**Text and language**
+
+Both Dutch (`nl`, default) and English (`en`) are required.
+
+- Domain and server text: `t(language, nl, en)` or `{ nl, en }` records in `scenario.ts`/`steps.ts`.
+- UI text: `apps/web/src/i18n.ts`. The `en` object is typed as `typeof nl`, so a missing key is a type error.
+- Error messages in `GameError` are Dutch and shown to users.
+
+**Environment variable**
+
+Read it in the API (`service.ts` or `index.ts`), never in the domain; pass values via `Ctx` if the domain needs them. Add it to `.env.example`, to `render.yaml` if it is needed in the cloud, and to `docs/local.md` or `docs/deployment.md`.
+
+## Testing notes
+
+- Domain tests build a session with `createSession` + `claimRole`/`markReady` for all four orgs and drive it with `dispatch`, advancing `ctx.now` by hand. Follow that pattern; do not use fake timers.
+- API tests use `createApp(new MemoryStore())` and `app.request(...)` with dev tokens from `/api/dev/anonymous`. Without `GAME_FILE` the store stays in memory.
+- E2E tests locate elements by `data-testid` (for example `start-session`, `session-code`, `free-<org>`, `claim-role`, `phone-<org>`, `ready`). Keep existing test ids stable when refactoring UI. `E2E_VERBOSE=1` logs every tick.
+- Layout requirements covered by e2e: the host screen at 1920×1080 must not scroll; phones (360×640, 390×844, 430×932) must not scroll horizontally.
+- Only the host screen plays sound (`apps/web/src/sound.ts`); phones stay silent.
+
+## Code style
+
+- TypeScript strict, ES modules. Inside `packages/domain` and `services/game-api`, relative imports use the `.js` extension (`./types.js`).
+- No semicolons, single quotes, two-space indent, trailing commas in multiline literals. Match the surrounding file; there is no formatter or linter configured.
+- Code, identifiers and comments in English; user-facing text bilingual as above; docs in `docs/` in Dutch.
+- Comments only for constraints the code cannot show. No narrating comments.
+- Keep dependencies minimal. Prefer the platform and existing libraries (Hono, React Router, `pg`, `qrcode`).
+
+## Out of scope unless asked
+
+- The ideas list at the end of the spec is explicitly not to be built.
+- No connections to real BDI registries, identity providers or organisations.
+- No per-entity relational schema; sessions stay one JSON document.

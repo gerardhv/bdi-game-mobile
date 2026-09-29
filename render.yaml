@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: bdi-game-api
+    runtime: node
+    plan: free
+    region: frankfurt
+    # --include=dev: tsx is a devDependency and NODE_ENV=production would skip it.
+    buildCommand: npm install --include=dev
+    startCommand: npm run start -w @bdi/game-api
+    healthCheckPath: /health
+    buildFilter:
+      paths:
+        - services/game-api/**
+        - packages/domain/**
+        - package.json
+        - package-lock.json
+        - render.yaml
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+      - key: ALLOW_DEV_AUTH
+        value: "true"
+      - key: AUTH_SECRET
+        generateValue: true
+      - key: INTERNAL_TICK_SECRET
+        generateValue: true
+      - key: CORS_ORIGIN
+        sync: false
+      - key: DATABASE_URL
+        sync: false
