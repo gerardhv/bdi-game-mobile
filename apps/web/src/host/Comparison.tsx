@@ -13,7 +13,6 @@ export function Comparison({ view, onClose }: { view: Training; onClose: () => v
     { label: t.mWrong, read: (m) => String(m.wrongAttempts ?? 0) },
     { label: t.mDecision, read: (m) => seconds(m.activeDecisionMs) },
     { label: t.mPresentation, read: (m) => seconds(m.presentationMs) },
-    { label: t.mAnimation, read: (m) => seconds(m.animationMs) },
     { label: t.mPause, read: (m) => seconds(m.pauseMs) },
     { label: t.mCoordination, read: (m) => String(Array.isArray(m.coordinationSteps) ? m.coordinationSteps.length : 0) },
     { label: t.mNotices, read: (m) => String(m.notificationsReceived ?? 0) },
@@ -23,7 +22,6 @@ export function Comparison({ view, onClose }: { view: Training; onClose: () => v
   return (
     <section className="comparison" data-testid="comparison">
       <h2><TrophyIcon />{t.comparisonTitle}</h2>
-      <p className="note">{t.comparisonNote}</p>
       <table>
         <thead>
           <tr>

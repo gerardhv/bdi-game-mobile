@@ -68,7 +68,6 @@ export function RegistryCard({ round, lang }: { round: Round; lang: 'nl' | 'en' 
           <span key={org.name} className="chip" title={org.name}><RoleIcon org={org.organizationId} /> ✓</span>
         ))}
       </div>
-      <p>{t.associationNote}</p>
       <h4>{t.orchestration}</h4>
       <div className="chips">
         {round.registries.orchestration.map((org) => <span key={org.roleLabel} className="chip">{org.roleLabel}</span>)}

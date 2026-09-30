@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { api, phoneBase } from '../api'
 import { tr, useDocumentLang } from '../i18n'
 import { useLive } from '../live'
 import { MapView } from '../Map'
 import { play, setSoundEnabled, soundEnabled, unlockAudio } from '../sound'
 import { ORGS, type Training } from '../types'
-import { Caption, Wordmark } from '../ui'
+import { Caption, FullscreenIcon, SettingsIcon, VolumeIcon, Wordmark } from '../ui'
 import { CommStrip, EventsCard, RegistryCard } from './CommStrip'
 import { Comparison } from './Comparison'
 import { Explainer } from './Explainer'
@@ -17,26 +17,39 @@ import { RolePanel } from './RolePanels'
 
 export function Host() {
   const { sessionId = '' } = useParams()
+  const navigate = useNavigate()
   const { data: view, status, error, refresh } = useLive<Training>(sessionId, { kind: 'training' })
   const [review, setReview] = useState<number | null>(null)
   const [pausedForReview, setPausedForReview] = useState(false)
   const [drawer, setDrawer] = useState(false)
   const [sound, setSound] = useState(soundEnabled())
+  const [fullscreen, setFullscreen] = useState(Boolean(document.fullscreenElement))
   const [phoneUrl, setPhoneUrl] = useState('')
   const [hideComparison, setHideComparison] = useState(false)
   const [showDossiers, setShowDossiers] = useState(false)
+  const [actionError, setActionError] = useState('')
   const lastSequence = useRef<number | null>(null)
   useDocumentLang(view?.language)
 
   useEffect(() => { void phoneBase().then(setPhoneUrl).catch(() => setPhoneUrl('')) }, [])
+  useEffect(() => {
+    const sync = () => setFullscreen(Boolean(document.fullscreenElement))
+    document.addEventListener('fullscreenchange', sync)
+    return () => document.removeEventListener('fullscreenchange', sync)
+  }, [])
 
   const post = useCallback(async (path: string, body?: unknown) => {
+    setActionError('')
     try {
       await api(`/api/sessions/${sessionId}/${path}`, { method: 'POST', body: body ? JSON.stringify(body) : undefined })
+      return true
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : tr(view?.language).offline)
+      return false
     } finally {
       void refresh()
     }
-  }, [refresh, sessionId])
+  }, [refresh, sessionId, view?.language])
 
   const hostStep = useCallback((value: 'continue' | 'skip') => {
     if (!view?.round) return
@@ -141,9 +154,25 @@ export function Host() {
     ? () => void post('start')
     : null
 
-  const onAction = (action: ManageAction) => {
+  const toggleFullscreen = () => {
+    if (document.fullscreenElement) void document.exitFullscreen()
+    else void document.documentElement.requestFullscreen?.()
+  }
+
+  const onAction = async (action: ManageAction) => {
     if (action === 'resume') setPausedForReview(false)
-    void post(action)
+    const ok = await post(action)
+    if (action === 'finish' && ok) navigate('/')
+  }
+
+  if (view.status === 'closed') {
+    return (
+      <main className="stage stage-wait">
+        <Wordmark light />
+        <p>{t.sessionEnded}</p>
+        <button type="button" className="btn primary" onClick={() => navigate('/')}>{t.backHome}</button>
+      </main>
+    )
   }
 
   return (
@@ -154,7 +183,7 @@ export function Host() {
     >
       <header className="hud-top">
         <Wordmark light />
-        <strong className="hud-name">{view.sessionName}</strong>
+        {view.sessionName && view.sessionName !== 'BDI Game' && <strong className="hud-name">{view.sessionName}</strong>}
         {round ? (
           <>
             <span className={`hud-pill${round.mode === 'with_bdi' ? ' round-bdi' : ''}`}>{t.round} {round.number} · {round.mode === 'with_bdi' ? t.withBdi : t.withoutBdi}</span>
@@ -166,7 +195,6 @@ export function Host() {
         {view.paused && round && (
           <button type="button" className="hud-pill paused" data-testid="hud-resume" onClick={() => void post('resume')}>{t.resume}</button>
         )}
-        {round && <span className="hud-pill training">{t.training}</span>}
         <span className="hud-spacer" />
         {status !== 'live' && <span className="hud-pill paused" data-testid="live-status">{status === 'polling' ? t.reconnecting : status === 'offline' ? t.offline : t.updating}</span>}
         {round && (
@@ -180,10 +208,35 @@ export function Host() {
             {showDossiers ? t.hideDossiers : t.showDossiers}
           </button>
         )}
-        <button type="button" className="btn ghost" aria-label={t.sound} data-testid="hud-sound" onClick={() => { unlockAudio(); setSoundEnabled(!sound); setSound(!sound) }}>{sound ? t.soundOn : t.soundOff}</button>
-        <button type="button" className="btn ghost" onClick={() => void document.documentElement.requestFullscreen?.()}>{t.fullscreen}</button>
-        <button type="button" className="btn ghost" data-testid="manage" onClick={() => setDrawer(true)}>{t.manage}</button>
+        <button
+          type="button"
+          className="btn ghost icon-btn"
+          aria-label={sound ? t.soundOn : t.soundOff}
+          data-testid="hud-sound"
+          onClick={() => { unlockAudio(); setSoundEnabled(!sound); setSound(!sound) }}
+        >
+          <VolumeIcon muted={!sound} />
+        </button>
+        <button
+          type="button"
+          className="btn ghost icon-btn"
+          aria-label={fullscreen ? t.exitFullscreen : t.fullscreen}
+          data-testid="hud-fullscreen"
+          onClick={toggleFullscreen}
+        >
+          <FullscreenIcon exit={fullscreen} />
+        </button>
+        <button
+          type="button"
+          className="btn ghost icon-btn"
+          aria-label={t.manage}
+          data-testid="manage"
+          onClick={() => setDrawer(true)}
+        >
+          <SettingsIcon />
+        </button>
       </header>
+      {actionError && <p className="hud-error" role="alert">{actionError}</p>}
 
       {!round && (
         <Lobby

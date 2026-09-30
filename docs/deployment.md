@@ -129,16 +129,16 @@ Je hebt geen Render-Postgres of Redis nodig; sessies staan in Supabase.
 
 1. Kies op https://vercel.com **Add New… → Project** en importeer `bdi-game-mobile`.
 2. Vercel ziet in de monorepo twee apps (`apps/web` en `services/game-api`). **Importeer alleen `apps/web`.** Klik bij `web` op **Import single project**. Zet `game-api` niet op Vercel: die draait op Render (zie stap 3). Kies ook niet “Services” om beide te groeperen.
-3. Laat **Root Directory** daarna op `apps/web` staan, of op de repository-root met build via [`vercel.json`](../vercel.json) in de root — beide werken. Als je de root gebruikt: build command en output directory komen uit `vercel.json`; laat die velden op de standaardwaarde staan.
-4. Voeg onder **Environment Variables** toe:
-   - `VITE_API_URL` = het Render-adres uit stap 3, zonder slash aan het eind.
-5. Kies **Deploy** en noteer het adres, bijvoorbeeld `https://bdi-game-mobile.vercel.app`.
+3. Zet daarna **Root Directory** op de **repository-root** (`.` / leeg), niet op `apps/web`. De build komt uit [`vercel.json`](../vercel.json) in de root (`npm run build -w @bdi/web` → `apps/web/dist`). Als Root Directory op `apps/web` blijft staan, vindt npm de monorepo-workspaces niet en faalt de build.
+4. Voeg onder **Environment Variables** toe (Production + Preview):
+   - `VITE_API_URL` = het Render-adres uit stap 3, zonder slash aan het eind, bijvoorbeeld `https://bdi-game-api.onrender.com`.
+5. Kies **Deploy**. Zie je daarna “No Production Deployment” / “No Active Branches”, dan is de eerste deploy nooit gestart — zie [Problemen oplossen](#problemen-oplossen).
 
 `VITE_PUBLIC_BASE_URL` is niet nodig: de QR-codes gebruiken het adres waarop de beamer de site opent. Zet hem alleen als je een eigen domein gebruikt en de QR-codes daarnaar moeten wijzen.
 
 `VITE_…`-variabelen worden tijdens de build in de website gezet. Pas je er een aan, kies dan **Redeploy**.
 
-Vercel slaat een build over als een commit niets in `apps/web` of de rootbestanden wijzigt.
+Vercel slaat een build over als een commit niets in `apps/web` of de rootbestanden wijzigt (zie `ignoreCommand` in `vercel.json`).
 
 ## 5. CORS vastzetten
 
@@ -172,7 +172,12 @@ De `service_role` key hoort nergens in Vercel of in de website. Zet ook `VITE_AL
 ## Problemen oplossen
 
 - **Render vraagt alle velden handmatig en lijkt `render.yaml` te negeren**: je zit in **New → Web Service**. Dat pad leest het YAML-bestand nooit. Gebruik **New → Blueprint**, of vul de tabel onder “Optie B” in. `render.yaml` moet op GitHub staan op de gekoppelde branch.
-- **Vercel wil `web` én `game-api` importeren**: importeer alleen `apps/web` via **Import single project**. De API blijft op Render.
+- **Vercel wil `web` én `game-api` importeren**: importeer alleen `apps/web` via **Import single project**. De API blijft op Render. Zet daarna **Root Directory** terug naar de repository-root (`.`), zodat `vercel.json` en de npm-workspaces werken.
+- **Vercel toont “No Production Deployment” / “No Active Branches”**: het project is aangemaakt, maar er is nog geen deploy geweest. Doe dit:
+  1. **Settings → Environment Variables**: zet `VITE_API_URL` = `https://bdi-game-api.onrender.com` (Production + Preview).
+  2. **Settings → General → Root Directory**: leeg / `.` (niet `apps/web`).
+  3. **Settings → Git**: gekoppeld aan `gerardhv/bdi-game-mobile`, Production Branch `main`.
+  4. **Deployments → Create Deployment** (of **Redeploy**), kies branch `main`. Of push een nieuwe commit naar `main` zodat Vercel opnieuw bouwt.
 - **Website laadt, maar maakt geen spel aan of toont netwerkfouten in de browserconsole**: controleer `VITE_API_URL` (geen slash aan het eind, opnieuw gedeployd) en `CORS_ORIGIN` (exact het Vercel-adres, met `https://`, zonder slash).
 - **API start niet, `tsx: not found`**: het build command mist `--include=dev`.
 - **API start niet, `ENETUNREACH` of time-out naar `db.….supabase.co`**: je gebruikt de Direct connection; neem de Session pooler.

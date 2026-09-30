@@ -1,7 +1,7 @@
 import type { CSSProperties } from 'react'
 import { CheckBadge, RoleIcon } from '../art/icons'
 import { tr } from '../i18n'
-import { Qr } from '../ui'
+import { isLanHost, Qr } from '../ui'
 import type { Training } from '../types'
 
 export function Lobby({
@@ -14,11 +14,12 @@ export function Lobby({
   startLabel: string
 }) {
   const t = tr(view.language)
+  const lan = isLanHost()
   return (
     <section className="lobby">
       <div className="lobby-head">
         <span className="code" aria-label={t.sessionCode} data-testid="session-code">{view.code}</span>
-        <p>{t.lobbyHint(phoneUrl || t.lobbyWifi)}</p>
+        <p>{lan ? t.lobbyHintLocal(phoneUrl || t.lobbyWifi) : t.lobbyHintOnline}</p>
       </div>
       <div className="qr-grid">
         {view.roles.map((role) => (

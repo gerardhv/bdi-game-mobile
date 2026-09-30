@@ -167,7 +167,7 @@ button.tile:active:not(:disabled) { transform: scale(0.96); }
 .balloon:nth-of-type(2n) { animation-delay: 0.6s; }
 .hud-name { font-size: 1.05em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 22em; }
 .stage-wait { display: grid; place-items: center; align-content: center; gap: 1em; color: #fff; }
-.stage-wait .wordmark { height: 4em; }
+.stage-wait .wordmark { height: auto; font-size: 2.2rem; }
 .trophy { width: 2.4em; height: 2.4em; }
 .field.check span { display: flex; align-items: center; gap: 8px; }
 .field.check input { min-height: 0; width: 22px; height: 22px; }
@@ -194,7 +194,39 @@ button.tile:active:not(:disabled) { transform: scale(0.96); }
 }
 
 /* ---------- Wordmark ---------- */
-.wordmark { height: 1.9em; width: auto; display: block; }
+.wordmark {
+  height: 1.9em;
+  width: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45em;
+  font-family: 'Nunito Variable', Nunito, sans-serif;
+  font-weight: 900;
+  line-height: 1;
+  color: var(--navy);
+}
+.wordmark-mark {
+  height: 1.55em;
+  width: 1.55em;
+  flex: 0 0 auto;
+  display: block;
+  overflow: visible;
+  aspect-ratio: 1;
+}
+.wordmark-text { font-size: 1.05em; letter-spacing: -0.02em; white-space: nowrap; }
+.wordmark.is-light { color: #fff; }
+.hud-glyph { width: 1.15em; height: 1.15em; display: block; }
+.icon-btn { padding-inline: 0.55em !important; min-width: 2.2em; }
+.hud-error {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 0.4em 0.8em;
+  border-radius: 10px;
+  background: rgb(180 40 40 / 85%);
+  color: #fff;
+  font-weight: 800;
+  text-align: center;
+}
 
 /* ---------- Home ---------- */
 .home {
@@ -214,7 +246,8 @@ button.tile:active:not(:disabled) { transform: scale(0.96); }
   box-shadow: var(--shadow);
   animation: rise 300ms ease;
 }
-.home-card .wordmark { height: 56px; margin: 0 auto 4px; }
+.home-card .wordmark { height: auto; margin: 0 auto 4px; font-size: 1.85rem; }
+.home-card .wordmark-mark { height: 1.25em; width: 1.25em; }
 .home-card h1 { font-size: 1.35rem; text-align: center; color: var(--ink-soft); font-weight: 800; }
 .home-roles { display: flex; justify-content: center; gap: 10px; }
 .home-roles svg { width: 54px; height: 54px; animation: float 3s ease-in-out infinite; }
@@ -270,7 +303,8 @@ button.hud-pill:hover { filter: brightness(1.05); }
 .hud-pill.training { background: rgb(255 255 255 / 80%); font-weight: 800; }
 .hud-spacer { flex: 1; }
 .hud-top .btn { min-height: 2em; padding: 0.2em 0.9em; font-size: 0.8em; }
-.hud-top .wordmark { height: 1.8em; }
+.hud-top .wordmark { height: auto; font-size: 1.15em; }
+.hud-top .wordmark-mark { height: 1.35em; width: 1.35em; }
 
 .side { display: flex; flex-direction: column; gap: 0.6vw; min-height: 0; }
 .side > .role-panel { flex: 1 1 0; min-height: 0; }

@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import QRCode from 'qrcode'
 import { phoneBase } from './api'
+import { BdiMark } from './art/BdiMark'
 import {
   BellIcon, CheckBadge, ClockIcon, CrossBadge, DriverPortrait, isDriver, ProductIcon, RoleIcon, type Org,
 } from './art/icons'
@@ -24,20 +25,70 @@ export function Qr({ path }: { path: string }) {
 }
 
 export function Wordmark({ light = false }: { light?: boolean }) {
-  const text = light ? '#ffffff' : '#1b2a4a'
   return (
-    <svg className="wordmark" viewBox="0 0 250 64" role="img" aria-label="BDI Game">
-      <g transform="translate(2 4)">
-        <path d="M4 18 28 7l24 11v26L28 56 4 44Z" fill="#c9905a" />
-        <path d="M28 29v27L4 44V18Z" fill="#b57a45" />
-        <path d="M4 18 28 29l24-11L28 7Z" fill="#dca774" />
-        <circle cx="42" cy="12" r="10" fill="#f2c230" stroke="#fff" strokeWidth="3" />
-        <path d="M37 12h10M42 7v10" stroke="#1b2a4a" strokeWidth="3" strokeLinecap="round" />
-      </g>
-      <text x="64" y="44" fontFamily="'Nunito Variable', Nunito, sans-serif" fontWeight="900" fontSize="38" fill={text}>BDI</text>
-      <text x="140" y="44" fontFamily="'Nunito Variable', Nunito, sans-serif" fontWeight="800" fontSize="38" fill="#4aa3e8">Game</text>
+    <span className={`wordmark${light ? ' is-light' : ''}`} role="img" aria-label="BDI Game">
+      <BdiMark className="wordmark-mark" />
+      <span className="wordmark-text">BDI Game</span>
+    </span>
+  )
+}
+
+export function VolumeIcon({ muted = false }: { muted?: boolean }) {
+  return (
+    <svg className="hud-glyph" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M3 8.5h3.6L11 4.2v15.6L6.6 15.5H3Z" fill="currentColor" />
+      {!muted && (
+        <>
+          <path d="M14.2 8.4a4 4 0 0 1 0 7.2" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          <path d="M16.8 5.6a7.2 7.2 0 0 1 0 12.8" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        </>
+      )}
+      {muted && <path d="M14 8.5 20.5 15M20.5 8.5 14 15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />}
     </svg>
   )
+}
+
+export function FullscreenIcon({ exit = false }: { exit?: boolean }) {
+  return (
+    <svg className="hud-glyph" viewBox="0 0 24 24" aria-hidden="true">
+      {exit ? (
+        <>
+          <path d="M9 4v5H4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M15 4v5h5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M9 20v-5H4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M15 20v-5h5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        </>
+      ) : (
+        <>
+          <path d="M4 9V4h5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M20 9V4h-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M4 15v5h5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M20 15v5h-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        </>
+      )}
+    </svg>
+  )
+}
+
+export function SettingsIcon() {
+  return (
+    <svg className="hud-glyph" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M10.1 3.4h3.8l.4 2.1c.5.2 1 .4 1.4.8l2-.8 1.9 1.9-.8 2c.3.5.6 1 .8 1.4l2.1.4v3.8l-2.1.4c-.2.5-.4 1-.8 1.4l.8 2-1.9 1.9-2-.8c-.5.3-1 .6-1.4.8l-.4 2.1h-3.8l-.4-2.1c-.5-.2-1-.4-1.4-.8l-2 .8-1.9-1.9.8-2c-.3-.5-.6-1-.8-1.4l-2.1-.4v-3.8l2.1-.4c.2-.5.4-1 .8-1.4l-.8-2 1.9-1.9 2 .8c.5-.3 1-.6 1.4-.8l.4-2.1Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" strokeWidth="1.8" />
+    </svg>
+  )
+}
+
+/** True when phones join over LAN (local/dev), not a public HTTPS host. */
+export function isLanHost(hostname = window.location.hostname): boolean {
+  if (hostname === 'localhost' || hostname === '127.0.0.1') return true
+  return /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(hostname)
 }
 
 export function timeOf(label: string): string | null {

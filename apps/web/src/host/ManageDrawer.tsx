@@ -13,7 +13,7 @@ export function ManageDrawer({
   live: LiveStatus
   sound: boolean
   onSound: (on: boolean) => void
-  onAction: (action: ManageAction) => void
+  onAction: (action: ManageAction) => void | Promise<void>
   onReview: () => void
   onLanguage: (language: 'nl' | 'en') => void
   onClose: () => void
@@ -65,7 +65,7 @@ export function ManageDrawer({
           <p>{confirm === 'restart' ? t.restart : t.finish}</p>
           <p>{t.confirmQuestion}</p>
           <div className="drawer-actions">
-            <button type="button" className="btn danger" data-testid="confirm-yes" onClick={() => { onAction(confirm); setConfirm(null); onClose() }}>{t.confirmYes}</button>
+            <button type="button" className="btn danger" data-testid="confirm-yes" onClick={() => { void onAction(confirm); setConfirm(null); onClose() }}>{t.confirmYes}</button>
             <button type="button" className="btn" onClick={() => setConfirm(null)}>{t.cancel}</button>
           </div>
         </div>
