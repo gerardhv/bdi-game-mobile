@@ -159,10 +159,19 @@ export function Host() {
     else void document.documentElement.requestFullscreen?.()
   }
 
+  const goHome = () => {
+    // Test table embeds host + phones in iframes; leaving only the iframe keeps the old phones.
+    if (window.top && window.top !== window) {
+      window.top.location.hash = '#/'
+      return
+    }
+    navigate('/')
+  }
+
   const onAction = async (action: ManageAction) => {
     if (action === 'resume') setPausedForReview(false)
     const ok = await post(action)
-    if (action === 'finish' && ok) navigate('/')
+    if (action === 'finish' && ok) goHome()
   }
 
   if (view.status === 'closed') {
@@ -170,7 +179,7 @@ export function Host() {
       <main className="stage stage-wait">
         <Wordmark light />
         <p>{t.sessionEnded}</p>
-        <button type="button" className="btn primary" onClick={() => navigate('/')}>{t.backHome}</button>
+        <button type="button" className="btn primary" onClick={goHome}>{t.backHome}</button>
       </main>
     )
   }

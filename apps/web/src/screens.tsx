@@ -21,7 +21,12 @@ export function Home() {
     setBusy(true)
     try {
       const view = await api<Training>('/api/sessions', { method: 'POST', body: JSON.stringify({ language: lang, startMode }) })
-      navigate(withSlot(`/host/${view.sessionId}`))
+      const path = withSlot(`/host/${view.sessionId}`)
+      if (window.top && window.top !== window) {
+        window.top.location.hash = `#${path}`
+        return
+      }
+      navigate(path)
     } catch (err) {
       setError(err instanceof Error ? err.message : t.offline)
       setBusy(false)
