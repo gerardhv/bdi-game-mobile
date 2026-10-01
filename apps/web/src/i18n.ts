@@ -36,7 +36,6 @@ const nl = {
   training: 'Beamer',
   showDossiers: 'Toon dossiers',
   hideDossiers: 'Verberg dossiers',
-  dossiersHidden: 'Dossiers verborgen',
   updating: 'Bijwerken',
   reviewBanner: 'Terugblik — spel gepauzeerd',
   backToLive: 'Terug naar live',
@@ -109,7 +108,7 @@ const nl = {
   explainerRound1: [
     'Vier organisaties werken samen om één product bij de koper te krijgen.',
     'Iedere organisatie weet alleen wat zij zelf vastlegt. De rest moet je navragen.',
-    'Kijk op het grote scherm mee: wie weet wat, en wanneer?',
+    'Volg op het grote scherm de keten: wie is aan zet?',
   ],
   explainerBdi: [
     'In complexe logistieke ketens is het delen van data essentieel.',
@@ -134,9 +133,6 @@ const nl = {
   tabNotices: 'Meldingen',
   noInfo: 'Nog geen informatie in je dossier.',
   noNotices: 'Nog geen meldingen.',
-  notes: 'Eigen notities',
-  saveNote: 'Bewaar notitie',
-  saved: 'Bewaard',
   fetchingData: 'Informatie wordt opgehaald bij de bron…',
   sending: 'Versturen…',
   roundDone: 'Afgeleverd! Kijk mee op het grote scherm.',
@@ -182,7 +178,6 @@ const en: Dict = {
   training: 'Main screen',
   showDossiers: 'Show dossiers',
   hideDossiers: 'Hide dossiers',
-  dossiersHidden: 'Dossiers hidden',
   updating: 'Updating',
   reviewBanner: 'Review — game paused',
   backToLive: 'Back to live',
@@ -255,7 +250,7 @@ const en: Dict = {
   explainerRound1: [
     'Four organisations work together to get one product to the buyer.',
     'Each organisation only knows what it records itself. Everything else must be asked.',
-    'Watch the big screen: who knows what, and when?',
+    'Follow the chain on the big screen: whose turn is it?',
   ],
   explainerBdi: [
     'In complex logistics chains, sharing data is essential.',
@@ -279,9 +274,6 @@ const en: Dict = {
   tabNotices: 'Notices',
   noInfo: 'No information in your dossier yet.',
   noNotices: 'No notices yet.',
-  notes: 'Own notes',
-  saveNote: 'Save note',
-  saved: 'Saved',
   fetchingData: 'Fetching information from the source…',
   sending: 'Sending…',
   roundDone: 'Delivered! Watch the big screen.',

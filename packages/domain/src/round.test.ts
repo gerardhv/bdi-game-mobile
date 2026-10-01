@@ -192,4 +192,25 @@ describe('round rules', () => {
     expect(readSource(state.rounds[0], 'seller', `buyer-data/order/${order.id}`)).toBeNull()
     expect(readSource(state.rounds[0], 'buyer', `buyer-data/order/${order.id}`)?.productId).toBe('camera')
   })
+
+  it('restarts the current BDI round even while paused', () => {
+    let state = start(session(), 'only_bdi')
+    state = act(state, 'host', 'skip')
+    const before = state.rounds[0]
+    expect(before.mode).toBe('with_bdi')
+    state = dispatch(state, { type: 'pause', userId: 'host' }, ctx()).state
+    expect(state.status).toBe('paused')
+    state = dispatch(state, {
+      type: 'restartRound', userId: 'host', roundId: 'round-restart', seed: 'SEED-RESTART',
+      orderId: 'order-r', transportId: 'transport-r',
+    }, ctx()).state
+    const round = state.rounds.find((item) => item.id === state.currentRoundId)!
+    expect(state.status).toBe('running')
+    expect(state.comparison).toBe(false)
+    expect(round.id).toBe('round-restart')
+    expect(round.number).toBe(before.number)
+    expect(round.mode).toBe('with_bdi')
+    expect(round.stepId).toBe('S00')
+    expect(state.rounds.some((item) => item.id === before.id)).toBe(false)
+  })
 })

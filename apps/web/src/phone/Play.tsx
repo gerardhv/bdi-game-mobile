@@ -16,8 +16,6 @@ export function Play() {
   const { data: view, status, error, refresh } = useLive<Player>(sessionId, { kind: 'player' })
   const [tab, setTab] = useState<Tab>('task')
   const [pending, setPending] = useState<string | null>(null)
-  const [notes, setNotes] = useState<string | null>(null)
-  const [saved, setSaved] = useState(false)
   const [actionError, setActionError] = useState('')
   const seenNotices = useRef(0)
   useDocumentLang(view?.language)
@@ -172,26 +170,10 @@ export function Play() {
         )}
 
         {round && tab === 'info' && (
-          <>
-            <section className="dossier" data-testid="dossier">
-              {round.dossier.length === 0 && <p className="empty">{t.noInfo}</p>}
-              {round.dossier.map((item) => <FactRow key={`${item.label}-${item.value}`} fact={item} />)}
-            </section>
-            <form
-              className="task-card"
-              onSubmit={(event) => {
-                event.preventDefault()
-                void api(`/api/sessions/${sessionId}/notes`, { method: 'POST', body: JSON.stringify({ text: notes ?? round.notes }) })
-                  .then(() => { setSaved(true); setTimeout(() => setSaved(false), 1500) })
-              }}
-            >
-              <label className="field">
-                <span>{t.notes}</span>
-                <textarea rows={3} maxLength={500} value={notes ?? round.notes} onChange={(e) => setNotes(e.target.value)} />
-              </label>
-              <button type="submit" className="btn">{saved ? t.saved : t.saveNote}</button>
-            </form>
-          </>
+          <section className="dossier" data-testid="dossier">
+            {round.dossier.length === 0 && <p className="empty">{t.noInfo}</p>}
+            {round.dossier.map((item) => <FactRow key={`${item.label}-${item.value}`} fact={item} />)}
+          </section>
         )}
 
         {round && tab === 'notices' && (
@@ -211,11 +193,11 @@ export function Play() {
       {round && (
         <nav className="phone-nav" aria-label={roleName}>
           <button type="button" aria-current={tab === 'task' ? 'page' : undefined} onClick={() => setTab('task')}><TaskIcon />{t.tabTask}</button>
-          <button type="button" aria-current={tab === 'info' ? 'page' : undefined} onClick={() => setTab('info')} data-testid="tab-info"><FolderIcon />{t.tabInfo}</button>
           <button type="button" aria-current={tab === 'notices' ? 'page' : undefined} onClick={() => setTab('notices')} data-testid="tab-notices">
             <BellOutline />{t.tabNotices}
             {unseen > 0 && tab !== 'notices' && <span className="count">{unseen}</span>}
           </button>
+          <button type="button" aria-current={tab === 'info' ? 'page' : undefined} onClick={() => setTab('info')} data-testid="tab-info"><FolderIcon />{t.tabInfo}</button>
         </nav>
       )}
     </main>

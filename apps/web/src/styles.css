@@ -272,6 +272,10 @@ button.tile:active:not(:disabled) { transform: scale(0.96); }
   padding: 0.6vw;
   font-size: clamp(13px, 1.2vw, 30px);
   background: radial-gradient(circle at 50% 55%, var(--water-shallow) 0, var(--water) 40%, var(--water-deep) 100%);
+  transition: grid-template-columns 200ms ease;
+}
+.stage.dossiers-off {
+  grid-template-columns: minmax(0, 15fr) minmax(0, 70fr) minmax(0, 15fr);
 }
 .hud-top {
   grid-column: 1 / -1;
@@ -308,6 +312,26 @@ button.hud-pill:hover { filter: brightness(1.05); }
 
 .side { display: flex; flex-direction: column; gap: 0.6vw; min-height: 0; }
 .side > .role-panel { flex: 1 1 0; min-height: 0; }
+.stage.dossiers-off .side { justify-content: space-between; }
+.stage.dossiers-off .side > .role-panel {
+  flex: 0 0 auto;
+  min-height: 0;
+}
+.stage.dossiers-off .role-panel {
+  padding: 0.7em 0.85em;
+  font-size: 0.88em;
+  overflow: visible;
+}
+.stage.dossiers-off .role-panel header { gap: 0.55em; }
+.stage.dossiers-off .role-panel header > div { min-width: 0; flex: 1; }
+.stage.dossiers-off .role-panel header svg { width: 2.6em; height: 2.6em; }
+.stage.dossiers-off .role-panel header h3 { font-size: 1.2em; }
+.stage.dossiers-off .role-panel > .activity {
+  margin-left: 0;
+  align-self: flex-start;
+  font-size: 0.9em;
+  padding: 0.2em 0.7em;
+}
 
 .role-panel {
   position: relative;
@@ -339,16 +363,6 @@ button.hud-pill:hover { filter: brightness(1.05); }
 }
 .role-panel.is-active .activity { background: var(--role); color: #fff; }
 .facts { display: grid; gap: 0.3em; overflow: auto; min-height: 0; }
-.dossier-sealed {
-  margin: 0;
-  padding: 0.55em 0.7em;
-  border-radius: 10px;
-  background: #f3f3f3;
-  border: 2px dashed #c9ced6;
-  color: var(--ink-soft);
-  font-weight: 800;
-  font-size: 0.85em;
-}
 .fact {
   display: grid;
   grid-template-columns: auto 1fr;

@@ -172,6 +172,11 @@ export function Host() {
     if (action === 'resume') setPausedForReview(false)
     const ok = await post(action)
     if (action === 'finish' && ok) goHome()
+    if (action === 'restart' && ok) {
+      setHideComparison(false)
+      setReview(null)
+      setPausedForReview(false)
+    }
   }
 
   if (view.status === 'closed') {
@@ -184,9 +189,11 @@ export function Host() {
     )
   }
 
+  const dossiersOpen = Boolean(round && showDossiers)
+
   return (
     <main
-      className="stage"
+      className={`stage${round && !showDossiers ? ' dossiers-off' : ''}`}
       data-testid="training-root"
       onPointerDown={() => unlockAudio()}
     >
@@ -260,10 +267,10 @@ export function Host() {
       {round && frame && (
         <>
           <div className="side side-left">
-            <RolePanel panel={panel('carrier')} active={isActive('carrier')} ask={isAsk('carrier')} reveal={showDossiers} hiddenLabel={t.dossiersHidden} />
-            {showDossiers && <EventsCard round={round} lang={view.language} />}
-            {showDossiers && round.mode === 'with_bdi' && <RegistryCard round={round} lang={view.language} />}
-            <RolePanel panel={panel('seller')} active={isActive('seller')} ask={isAsk('seller')} reveal={showDossiers} hiddenLabel={t.dossiersHidden} />
+            <RolePanel panel={panel('carrier')} active={isActive('carrier')} ask={isAsk('carrier')} reveal={dossiersOpen} />
+            {dossiersOpen && <EventsCard round={round} lang={view.language} />}
+            {dossiersOpen && round.mode === 'with_bdi' && <RegistryCard round={round} lang={view.language} />}
+            <RolePanel panel={panel('seller')} active={isActive('seller')} ask={isAsk('seller')} reveal={dossiersOpen} />
           </div>
           <div className="map-wrap">
             <MapView
@@ -305,9 +312,9 @@ export function Host() {
             {!reviewing && round.stepId !== 'S00' && round.stepId !== 'S20' && round.caption && <div className="map-caption"><Caption>{round.caption}</Caption></div>}
           </div>
           <div className="side side-right">
-            <RolePanel panel={panel('delivery')} active={isActive('delivery')} ask={isAsk('delivery')} reveal={showDossiers} hiddenLabel={t.dossiersHidden} />
+            <RolePanel panel={panel('delivery')} active={isActive('delivery')} ask={isAsk('delivery')} reveal={dossiersOpen} />
             <CommStrip round={round} comm={frame.comm} lang={view.language} />
-            <RolePanel panel={panel('buyer')} active={isActive('buyer')} ask={isAsk('buyer')} reveal={showDossiers} hiddenLabel={t.dossiersHidden} />
+            <RolePanel panel={panel('buyer')} active={isActive('buyer')} ask={isAsk('buyer')} reveal={dossiersOpen} />
           </div>
         </>
       )}

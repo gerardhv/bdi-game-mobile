@@ -419,7 +419,7 @@ function assertLive(session: SessionState, now: string): void {
 export function dispatch(session: SessionState, command: Command, ctx: Ctx): { state: SessionState; output: Record<string, unknown> } {
   const state = structuredClone(session)
   assertLive(state, ctx.now)
-  if (state.status === 'paused' && !['resume', 'heartbeat', 'tick', 'releaseRole', 'finishSession'].includes(command.type)) {
+  if (state.status === 'paused' && !['resume', 'heartbeat', 'tick', 'releaseRole', 'finishSession', 'restartRound'].includes(command.type)) {
     throw new GameError('paused', 'Het spel is gepauzeerd.', 409)
   }
   switch (command.type) {
