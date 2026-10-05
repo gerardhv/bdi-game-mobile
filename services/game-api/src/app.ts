@@ -22,6 +22,11 @@ export function createApp(store: Store) {
     return c.json({ error: 'server', message: 'Er ging iets mis.' }, 500)
   })
   const user = (c: { req: { header: (n: string) => string | undefined } }) => userFromAuth(c.req.header('authorization'))
+  const clientIp = (c: { req: { header: (n: string) => string | undefined } }) => {
+    const forwarded = c.req.header('x-forwarded-for')
+    if (forwarded) return forwarded.split(',')[0]?.trim() || 'unknown'
+    return c.req.header('x-real-ip')?.trim() || 'unknown'
+  }
   app.get('/health', (c) => c.json({ ok: true }))
   app.get('/api/network', (c) => {
     const addresses: string[] = []
@@ -33,7 +38,7 @@ export function createApp(store: Store) {
     return c.json({ addresses })
   })
   app.post('/api/dev/anonymous', async (c) => c.json(await game.anonymous()))
-  app.post('/api/sessions', async (c) => c.json(await game.create(await user(c), await c.req.json())))
+  app.post('/api/sessions', async (c) => c.json(await game.create(await user(c), await c.req.json(), clientIp(c))))
   app.get('/api/join', async (c) => c.json(await game.joinPreview(c.req.query('code') ?? '')))
   app.get('/api/sessions/:id/training', async (c) => c.json(await game.training(c.req.param('id'), await user(c))))
   app.get('/api/sessions/:id/training/history', async (c) => {

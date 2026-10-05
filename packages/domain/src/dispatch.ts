@@ -299,6 +299,7 @@ export function createSession(input: {
   now: string
   expiresAt: string
   invites: Record<OrgId, string>
+  creatorIp?: string | null
 }): SessionState {
   return {
     id: input.id,
@@ -311,6 +312,7 @@ export function createSession(input: {
     createdAt: input.now,
     lastActivityAt: input.now,
     expiresAt: input.expiresAt,
+    creatorIp: input.creatorIp ?? null,
     currentRoundId: null,
     comparison: false,
     creates: [],

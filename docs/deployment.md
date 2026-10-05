@@ -156,6 +156,7 @@ Zet in Render bij de service **Environment** `CORS_ORIGIN` op het Vercel-adres, 
 - **Updates.** Een push naar `main` deployt website en API opnieuw. Een API-deploy herstart het proces; lopende sessies komen terug uit Postgres, maar verbindingen vallen even weg. Push dus niet tijdens een spel.
 - **Supabase pauzeert** een gratis project na ongeveer een week zonder activiteit. Start de API dan niet op (fout bij verbinden met de database), herstart het project in het Supabase-dashboard en kies in Render **Manual Deploy → Restart**.
 - **Oude sessies.** Harde limiet: `SESSION_TTL_HOURS` (standaard 24 uur). Daarnaast sluit en verwijdert de API sessies na `SESSION_IDLE_MS` zonder activiteit (standaard 30 minuten; heartbeats van telefoons tellen als activiteit).
+- **Aanmaken.** Per client-IP staan maximaal `MAX_OPEN_SESSIONS_PER_IP` open spellen toe (standaard 10). Daarboven krijg je HTTP 429 tot er een spel eindigt of idle wordt opgeruimd.
 - **Kosten / load.** De API bundelt Postgres-writes (`PERSIST_INTERVAL_MS`) en ruimt idle sessies op, zodat outbound verkeer naar Supabase laag blijft. Wil je geen opwarmtijd op Render Free, dan haalt **Starter** het slapen weg. Eén API-instantie is voldoende; de API is niet gemaakt voor meerdere instanties naast elkaar.
 
 ## Optioneel: anonieme Supabase-login

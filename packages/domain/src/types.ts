@@ -234,6 +234,8 @@ export interface SessionState {
   /** Last non-tick command (including heartbeat). Used for idle cleanup. */
   lastActivityAt: string
   expiresAt: string
+  /** Client IP that created the session; used for open-session limits. */
+  creatorIp: string | null
   roles: RoleAssignment[]
   rounds: RoundState[]
   currentRoundId: string | null

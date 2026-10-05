@@ -40,4 +40,23 @@ describe('session isolation', () => {
     const hostView = await (await app.request(`/api/sessions/${created.sessionId}/training`, { headers: host.headers })).json() as { status: string }
     expect(hostView.status).not.toBe('closed')
   })
+
+  it('allows at most ten open sessions per client IP', async () => {
+    const { app } = createApp(new MemoryStore())
+    const host = await client(app)
+    const ipHeaders = { ...host.headers, 'x-forwarded-for': '203.0.113.10' }
+    for (let i = 0; i < 10; i += 1) {
+      const response = await app.request('/api/sessions', { method: 'POST', headers: ipHeaders, body: JSON.stringify({ name: `Zaal ${i}` }) })
+      expect(response.status).toBe(200)
+    }
+    const blocked = await app.request('/api/sessions', { method: 'POST', headers: ipHeaders, body: JSON.stringify({ name: 'Te veel' }) })
+    expect(blocked.status).toBe(429)
+    const otherIp = await client(app)
+    const other = await app.request('/api/sessions', {
+      method: 'POST',
+      headers: { ...otherIp.headers, 'x-forwarded-for': '203.0.113.99' },
+      body: JSON.stringify({ name: 'Ander netwerk' }),
+    })
+    expect(other.status).toBe(200)
+  })
 })

@@ -183,8 +183,9 @@ export class GameService {
     const userId = randomUUID()
     return { userId, token: signDev(userId) }
   }
-  async create(userId: string, input: { name?: string; language?: Language; startMode?: StartMode }) {
+  async create(userId: string, input: { name?: string; language?: Language; startMode?: StartMode }, creatorIp: string) {
     const now = new Date()
+    const maxOpen = Math.max(1, Number(process.env.MAX_OPEN_SESSIONS_PER_IP) || 10)
     const invites = Object.fromEntries(['buyer', 'seller', 'carrier', 'delivery'].map((org) => [org, randomUUID()])) as Record<OrgId, string>
     const state = createSession({
       id: randomUUID(),
@@ -196,8 +197,20 @@ export class GameService {
       now: now.toISOString(),
       expiresAt: new Date(now.getTime() + Number(process.env.SESSION_TTL_HOURS ?? 24) * 3600_000).toISOString(),
       invites,
+      creatorIp,
     })
-    await this.store.run((db) => { db.save(state); return state })
+    await this.store.run((db) => {
+      const openFromIp = db.list().filter((session) => session.status !== 'closed' && session.creatorIp === creatorIp)
+      if (openFromIp.length >= maxOpen) {
+        throw new GameError(
+          'limit',
+          `Je hebt al ${maxOpen} open spellen vanaf dit netwerk. Beëindig er een of wacht tot een verlaten spel wordt opgeruimd.`,
+          429,
+        )
+      }
+      db.save(state)
+      return state
+    })
     return trainingView(state)
   }
   async command(sessionId: string, userId: string, command: Command) {
