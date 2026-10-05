@@ -7,4 +7,6 @@ export interface Ctx {
   pipelineMs: number
   animationMs: number
   graceMs: number
+  /** Close sessions with no commands/heartbeats for this long (ms). */
+  idleMs: number
 }

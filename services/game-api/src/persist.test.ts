@@ -3,6 +3,7 @@ import { createSession, type SessionState } from '@bdi/domain'
 import { GameService, MemoryStore } from './service.js'
 
 function blankSession(id = '11111111-1111-1111-1111-111111111111'): SessionState {
+  const now = Date.now()
   return createSession({
     id,
     code: 'ABCDEF',
@@ -10,8 +11,8 @@ function blankSession(id = '11111111-1111-1111-1111-111111111111'): SessionState
     name: 'Test',
     language: 'nl',
     startMode: 'without_bdi',
-    now: '2026-01-01T10:00:00.000Z',
-    expiresAt: '2026-01-02T10:00:00.000Z',
+    now: new Date(now).toISOString(),
+    expiresAt: new Date(now + 24 * 3600_000).toISOString(),
     invites: {
       buyer: 'b',
       seller: 's',
@@ -99,5 +100,24 @@ describe('remote persist debounce', () => {
     await game.tickAll()
     await store.flushNow()
     expect(flushCount).toBe(1)
+  })
+
+  it('removes closed sessions from the store and calls onDelete', async () => {
+    const store = new MemoryStore()
+    const deleted: string[] = []
+    store.onDelete = async (ids) => { deleted.push(...ids) }
+    const game = new GameService(store)
+    const id = '11111111-1111-1111-1111-111111111111'
+
+    await store.run((db) => {
+      const session = blankSession(id)
+      session.status = 'closed'
+      db.save(session)
+      return null
+    })
+    await game.tickAll()
+    const left = await store.run((db) => db.list().map((s) => s.id))
+    expect(left).toEqual([])
+    expect(deleted).toEqual([id])
   })
 })

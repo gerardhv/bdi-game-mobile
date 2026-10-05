@@ -155,9 +155,8 @@ Zet in Render bij de service **Environment** `CORS_ORIGIN` op het Vercel-adres, 
 - **Opwarmen.** Render Free slaapt na 15 minuten zonder verkeer; de eerste aanvraag duurt dan ongeveer een minuut. Open een paar minuten voor de sessie `…/health` of de beamerpagina. Tijdens een spel houden de verbindingen van beamer en telefoons de API wakker.
 - **Updates.** Een push naar `main` deployt website en API opnieuw. Een API-deploy herstart het proces; lopende sessies komen terug uit Postgres, maar verbindingen vallen even weg. Push dus niet tijdens een spel.
 - **Supabase pauzeert** een gratis project na ongeveer een week zonder activiteit. Start de API dan niet op (fout bij verbinden met de database), herstart het project in het Supabase-dashboard en kies in Render **Manual Deploy → Restart**.
-- **Oude sessies** verlopen na `SESSION_TTL_HOURS` (standaard 24 uur).
-- **Kosten.** Alles past in de gratis plannen. Wil je geen opwarmtijd, dan haalt Render **Starter** (enkele dollars per maand) het slapen weg. Verder is er niets te schalen: één instantie is voldoende en de API is niet gemaakt voor meerdere instanties naast elkaar. Outbound bandbreedte naar Supabase telt mee als Service-Initiated; de API bundelt Postgres-writes (`PERSIST_INTERVAL_MS`) zodat een open sessie niet elke 500 ms het hele document uploadt.
-- **Oude open sessies** in Supabase die nog `lobby`/`running`/`paused` zijn, tikte de API vóór die bundeling elke halve seconde weg. Ruim die rijen op of zet ze op `closed` als je na een bandbreedte-piek opnieuw start.
+- **Oude sessies.** Harde limiet: `SESSION_TTL_HOURS` (standaard 24 uur). Daarnaast sluit en verwijdert de API sessies na `SESSION_IDLE_MS` zonder activiteit (standaard 30 minuten; heartbeats van telefoons tellen als activiteit).
+- **Kosten / load.** De API bundelt Postgres-writes (`PERSIST_INTERVAL_MS`) en ruimt idle sessies op, zodat outbound verkeer naar Supabase laag blijft. Wil je geen opwarmtijd op Render Free, dan haalt **Starter** het slapen weg. Eén API-instantie is voldoende; de API is niet gemaakt voor meerdere instanties naast elkaar.
 
 ## Optioneel: anonieme Supabase-login
 

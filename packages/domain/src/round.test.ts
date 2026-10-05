@@ -7,7 +7,7 @@ import {
 const orgs: OrgId[] = ['buyer', 'seller', 'carrier', 'delivery']
 
 function ctx(now = '2026-01-01T10:00:00.000Z', language: Ctx['language'] = 'nl'): Ctx {
-  return { now, language, presentationMs: 3000, pipelineMs: 1000, animationMs: 4000, graceMs: 30000 }
+  return { now, language, presentationMs: 3000, pipelineMs: 1000, animationMs: 4000, graceMs: 30000, idleMs: 30 * 60_000 }
 }
 
 function later(now: string, ms: number): string {
@@ -182,6 +182,27 @@ describe('round rules', () => {
     expect(state.rounds[0].metrics.pauseMs).toBe(60000)
     expect(state.rounds[0].metrics.activeDecisionMs).toBe(3000)
     expect(() => dispatch(state, { type: 'pause', userId: 'host' }, ctx(later(t0, 64000)))).not.toThrow()
+  })
+
+  it('closes a session after idleMs without activity', () => {
+    let state = createSession({
+      id: 'sess-idle', code: 'IDLE01', hostUserId: 'host', name: 'Idle', language: 'nl',
+      startMode: 'without_bdi', now: ctx().now, expiresAt: '2026-01-02T10:00:00.000Z',
+      invites: Object.fromEntries(orgs.map((org) => [org, `invite-${org}`])) as Record<OrgId, string>,
+    })
+    const idleAt = later(ctx().now, 30 * 60_000 + 1)
+    state = dispatch(state, { type: 'tick' }, ctx(idleAt)).state
+    expect(state.status).toBe('closed')
+  })
+
+  it('closes a session when expiresAt has passed', () => {
+    let state = createSession({
+      id: 'sess-exp', code: 'EXP001', hostUserId: 'host', name: 'Exp', language: 'nl',
+      startMode: 'without_bdi', now: ctx().now, expiresAt: later(ctx().now, 60_000),
+      invites: Object.fromEntries(orgs.map((org) => [org, `invite-${org}`])) as Record<OrgId, string>,
+    })
+    state = dispatch(state, { type: 'tick' }, ctx(later(ctx().now, 60_001))).state
+    expect(state.status).toBe('closed')
   })
 
   it('denies cross-session and unauthorized reads', () => {

@@ -57,7 +57,7 @@ Definition of done for a change: `npm run typecheck` and `npm test` pass. Run `n
 - `index.ts`: boot, optional Postgres, `setInterval(tickAll, 500)`.
 - `app.ts`: routes. Every mutating route maps to exactly one domain `Command`.
 - `service.ts`: `MemoryStore` (serialized `run()` transactions on cloned documents), dev-token signing, Supabase token check, `GameService`.
-- `postgres.ts`: loads all sessions at boot; `MemoryStore` upserts dirty sessions via debounced `onFlush` (`PERSIST_INTERVAL_MS`, immediate for new/closed).
+- `postgres.ts`: loads all sessions at boot; `MemoryStore` upserts via debounced `onFlush` (`PERSIST_INTERVAL_MS`, immediate for new/closed) and deletes via `onDelete` after idle/expiry close.
 
 ## Invariants — do not break these
 
@@ -121,7 +121,7 @@ Read it in the API (`service.ts` or `index.ts`), never in the domain; pass value
 Correctness invariants above are musts. These are **shoulds** for changes to the API, persistence, realtime, ticks, or cloud config: avoid unnecessary network, CPU, and storage work. Wasteful loops (for example writing the full session to Postgres on every tick) burn bandwidth and money on any plan and can take the service down when quotas are hit.
 
 1. **Do not chat with the database or network for free.** Postgres is a write-behind copy. Never write the full session document on every tick, heartbeat, or no-op. Persist via debounced `onFlush` (`PERSIST_INTERVAL_MS`); flush immediately only for new or closed sessions (and on process shutdown).
-2. **Idle must be cheap.** An open `lobby` / `paused` / abandoned session with nobody playing must not generate steady network, CPU, or DB write load. Skip remote persist when state is unchanged; prefer closing or stopping work on idle/expired sessions over leaving them in the tick loop forever.
+2. **Idle must be cheap.** An open `lobby` / `paused` / abandoned session with nobody playing must not generate steady network, CPU, or DB write load. Skip remote persist when state is unchanged. Idle sessions close after `SESSION_IDLE_MS` (default 30 min without commands/heartbeats) and are deleted from memory and Postgres; keep that behaviour.
 3. **Batch and debounce side effects.** Periodic loops (tick, health, cleanup) may run often in memory; side effects that leave the process (DB upserts, external HTTP, large logs) should be rare relative to the loop.
 4. **No keep-alive by hammering the network.** No self-fetch loops, dispatcher spam, or chatty probes just to avoid host sleep unless the user explicitly asks.
 5. **Prefer in-memory truth.** Do not add per-tick analytics, audit rows, or chatty third-party calls unless required for the game.

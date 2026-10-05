@@ -5,8 +5,16 @@ import {
   type Command, type Ctx, type Language, type OrgId, type SessionState, type StartMode,
 } from '@bdi/domain'
 
+type Db = {
+  get: (id: string) => SessionState | null
+  byCode: (code: string) => SessionState | null
+  save: (s: SessionState) => void
+  remove: (id: string) => void
+  list: () => SessionState[]
+}
+
 export interface Store {
-  run<T>(fn: (db: { get: (id: string) => SessionState | null; byCode: (code: string) => SessionState | null; save: (s: SessionState) => void; list: () => SessionState[] }) => T): Promise<T>
+  run<T>(fn: (db: Db) => T): Promise<T>
 }
 
 export class MemoryStore implements Store {
@@ -19,6 +27,7 @@ export class MemoryStore implements Store {
   private flushChain: Promise<void> = Promise.resolve()
   private persistIntervalMs = Math.max(1000, Number(process.env.PERSIST_INTERVAL_MS) || 15_000)
   onFlush: ((sessions: SessionState[]) => Promise<void>) | null = null
+  onDelete: ((ids: string[]) => Promise<void>) | null = null
   replaceAll(sessions: SessionState[]) {
     this.sessions = new Map(sessions.map((session) => [session.id, session]))
   }
@@ -57,19 +66,28 @@ export class MemoryStore implements Store {
     })
     return this.flushChain
   }
-  async run<T>(fn: (db: { get: (id: string) => SessionState | null; byCode: (code: string) => SessionState | null; save: (s: SessionState) => void; list: () => SessionState[] }) => T): Promise<T> {
+  async run<T>(fn: (db: Db) => T): Promise<T> {
     const run = this.chain.then(async () => {
       const dirty = new Map<string, SessionState>()
-      const db = {
-        get: (id: string) => dirty.get(id) ?? (this.sessions.get(id) ? structuredClone(this.sessions.get(id)!) : null),
+      const removed = new Set<string>()
+      const db: Db = {
+        get: (id: string) => {
+          if (removed.has(id)) return null
+          return dirty.get(id) ?? (this.sessions.get(id) ? structuredClone(this.sessions.get(id)!) : null)
+        },
         byCode: (code: string) => {
-          const found = [...dirty.values(), ...this.sessions.values()].find((s) => s.code === code.toUpperCase())
+          const found = [...dirty.values(), ...this.sessions.values()].find((s) => !removed.has(s.id) && s.code === code.toUpperCase())
           return found ? structuredClone(dirty.get(found.id) ?? found) : null
         },
-        save: (s: SessionState) => { dirty.set(s.id, s) },
-        list: () => [...this.sessions.values()].map((s) => structuredClone(s)),
+        save: (s: SessionState) => { removed.delete(s.id); dirty.set(s.id, s) },
+        remove: (id: string) => { dirty.delete(id); removed.add(id) },
+        list: () => [...this.sessions.values()].filter((s) => !removed.has(s.id)).map((s) => structuredClone(s)),
       }
       const result = await fn(db)
+      for (const id of removed) {
+        this.sessions.delete(id)
+        this.pendingRemote.delete(id)
+      }
       let urgent = false
       for (const [id, session] of dirty) {
         if (!this.sessions.has(id) || session.status === 'closed') urgent = true
@@ -77,6 +95,7 @@ export class MemoryStore implements Store {
         if (this.onFlush) this.pendingRemote.set(id, session)
       }
       this.flushFile()
+      if (this.onDelete && removed.size > 0) await this.onDelete([...removed])
       if (this.onFlush && dirty.size > 0) {
         if (urgent) await this.flushNow()
         else this.scheduleRemoteFlush()
@@ -139,6 +158,7 @@ function runtime(language: Language, now = new Date().toISOString()): Ctx {
     pipelineMs: Number(process.env.PIPELINE_MS ?? 1000),
     animationMs: Number(process.env.ANIMATION_MS ?? 4000),
     graceMs: Number(process.env.GRACE_MS ?? 30000),
+    idleMs: Number(process.env.SESSION_IDLE_MS ?? 30 * 60_000),
   }
 }
 
@@ -224,13 +244,16 @@ export class GameService {
   async tickAll() {
     await this.store.run((db) => {
       for (const session of db.list()) {
-        if (session.status === 'closed') continue
+        if (session.status === 'closed') {
+          db.remove(session.id)
+          continue
+        }
         try {
           const before = JSON.stringify(session)
           const result = dispatch(session, { type: 'tick' }, runtime(session.language))
           if (JSON.stringify(result.state) !== before) db.save(result.state)
         } catch {
-          /* expired sessions stop on the next claim */
+          /* ignore corrupt sessions; idle/expiry close inside tick */
         }
       }
       return null

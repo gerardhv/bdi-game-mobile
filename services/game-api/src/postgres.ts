@@ -26,4 +26,8 @@ export async function attachPostgres(store: MemoryStore, databaseUrl: string): P
       )
     }
   }
+  store.onDelete = async (ids) => {
+    if (ids.length === 0) return
+    await pool.query('delete from session_documents where id = any($1::uuid[])', [ids])
+  }
 }

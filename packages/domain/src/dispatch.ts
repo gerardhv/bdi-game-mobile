@@ -309,6 +309,7 @@ export function createSession(input: {
     language: input.language,
     startMode: input.startMode,
     createdAt: input.now,
+    lastActivityAt: input.now,
     expiresAt: input.expiresAt,
     currentRoundId: null,
     comparison: false,
@@ -418,10 +419,15 @@ function assertLive(session: SessionState, now: string): void {
 
 export function dispatch(session: SessionState, command: Command, ctx: Ctx): { state: SessionState; output: Record<string, unknown> } {
   const state = structuredClone(session)
+  if (command.type === 'tick') {
+    if (state.status === 'closed') return { state, output: { closed: true } }
+    return { state, output: tick(state, ctx) }
+  }
   assertLive(state, ctx.now)
-  if (state.status === 'paused' && !['resume', 'heartbeat', 'tick', 'releaseRole', 'finishSession', 'restartRound'].includes(command.type)) {
+  if (state.status === 'paused' && !['resume', 'heartbeat', 'releaseRole', 'finishSession', 'restartRound'].includes(command.type)) {
     throw new GameError('paused', 'Het spel is gepauzeerd.', 409)
   }
+  state.lastActivityAt = ctx.now
   switch (command.type) {
     case 'claimRole':
       return { state, output: claimRole(state, command, ctx) }
@@ -437,8 +443,6 @@ export function dispatch(session: SessionState, command: Command, ctx: Ctx): { s
       return { state, output: pause(state, command, ctx) }
     case 'resume':
       return { state, output: resume(state, command, ctx) }
-    case 'tick':
-      return { state, output: tick(state, ctx) }
     case 'finishSession':
       return { state, output: finish(state, command) }
     case 'restartRound':
@@ -637,8 +641,17 @@ function advanceIfDue(round: RoundState, ctx: Ctx): void {
   round.metrics.decisionStartedAt = ctx.now
 }
 
+function closeSession(state: SessionState): Record<string, unknown> {
+  state.status = 'closed'
+  state.expiresAt = new Date(0).toISOString()
+  return { closed: true }
+}
+
 function tick(state: SessionState, ctx: Ctx): Record<string, unknown> {
   const nowMs = new Date(ctx.now).getTime()
+  if (nowMs > new Date(state.expiresAt).getTime()) return closeSession(state)
+  const activityAt = state.lastActivityAt ?? state.createdAt
+  if (nowMs - new Date(activityAt).getTime() > ctx.idleMs) return closeSession(state)
   for (const role of state.roles) {
     if (!role.playerUserId || !role.lastSeenAt) continue
     const age = nowMs - new Date(role.lastSeenAt).getTime()

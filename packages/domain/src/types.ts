@@ -231,6 +231,8 @@ export interface SessionState {
   language: Language
   startMode: StartMode
   createdAt: string
+  /** Last non-tick command (including heartbeat). Used for idle cleanup. */
+  lastActivityAt: string
   expiresAt: string
   roles: RoleAssignment[]
   rounds: RoundState[]
