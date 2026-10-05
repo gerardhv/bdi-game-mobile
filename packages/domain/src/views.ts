@@ -1,12 +1,14 @@
 import { readSource } from './dispatch.js'
 import { buildFrame, commLine, highlightFor, knowledgePanels, ownDossier, simLabel } from './project.js'
-import { orgName, roleLabel, scenario } from './scenario.js'
-import { activeOrg, askRole, hintFor, isConfirm, narrative, promptFor, STEP_ACTOR, storyLine } from './steps.js'
-import type { Language, OrgId, RoundState, SessionState, StepId } from './types.js'
+import { orgName, roleLabel, scenario } from './games/logistics/scenario.js'
+import { activeOrg, askRole, hintFor, isConfirm, narrative, promptFor, STEP_ACTOR, storyLine } from './games/logistics/steps.js'
+import { getGame } from './catalog.js'
+import { ORGS, type Language, type OrgId, type RoundState, type SessionState, type StepId } from './types.js'
 
 export interface PlayerView {
   sessionId: string
   sessionName: string
+  gameId: string
   code: string
   language: Language
   role: OrgId
@@ -50,6 +52,8 @@ export interface PlayerView {
 export interface TrainingView {
   sessionId: string
   sessionName: string
+  gameId: string
+  gameTitle: string
   code: string
   language: Language
   status: SessionState['status']
@@ -136,6 +140,7 @@ export function playerView(session: SessionState, userId: string, now: string): 
   return {
     sessionId: session.id,
     sessionName: session.name,
+    gameId: session.gameId || 'logistics',
     code: session.code,
     language: session.language,
     role: role.organizationId,
@@ -202,9 +207,12 @@ function waitingLabel(round: RoundState, language: Language): string {
 export function trainingView(session: SessionState, now = new Date().toISOString()): TrainingView {
   const round = session.rounds.find((item) => item.id === session.currentRoundId) ?? null
   const ready = session.roles.every((role) => role.playerUserId && role.ready)
+  const game = getGame(session.gameId)
   return {
     sessionId: session.id,
     sessionName: session.name,
+    gameId: game.id,
+    gameTitle: game.titles[session.language],
     code: session.code,
     language: session.language,
     status: session.status,
@@ -216,7 +224,7 @@ export function trainingView(session: SessionState, now = new Date().toISOString
       organizationId: role.organizationId,
       name: orgName(role.organizationId, session.language),
       roleLabel: roleLabel(role.organizationId, session.language),
-      blurb: scenario.roleBlurbs[role.organizationId][session.language],
+      blurb: scenario.roleBlurbs[role.organizationId as keyof typeof scenario.roleBlurbs][session.language],
       claimed: Boolean(role.playerUserId),
       displayName: role.displayName,
       ready: role.ready,
@@ -239,12 +247,12 @@ export function trainingView(session: SessionState, now = new Date().toISOString
       events: round.trainingEvents.slice(-5).map((event) => ({ sequence: event.sequence, text: event.text, result: event.result })),
       history: round.trainingEvents,
       registries: round.mode === 'with_bdi' ? {
-        association: (['buyer', 'seller', 'carrier', 'delivery'] as OrgId[]).map((org) => ({
+        association: ORGS.map((org) => ({
           organizationId: org,
           name: orgName(org, session.language),
           status: session.language === 'nl' ? 'Geregistreerd' : 'Registered',
         })),
-        orchestration: (['buyer', 'seller', 'carrier', 'delivery'] as OrgId[]).map((org) => ({
+        orchestration: ORGS.map((org) => ({
           organizationId: org,
           roleLabel: roleLabel(org, session.language),
           issuedBy: orgName('seller', session.language),
@@ -308,6 +316,8 @@ export function leaked(view: unknown): string[] {
 export function previewJoin(session: SessionState, organizationId?: OrgId): {
   name: string
   language: Language
+  gameId: string
+  gameTitle: string
   free: { organizationId: OrgId; roleLabel: string; name: string; blurb: string }[]
   roles: { organizationId: OrgId; roleLabel: string; name: string; blurb: string; free: boolean }[]
   role: OrgId | null
@@ -316,11 +326,13 @@ export function previewJoin(session: SessionState, organizationId?: OrgId): {
     organizationId: org,
     roleLabel: roleLabel(org, session.language),
     name: orgName(org, session.language),
-    blurb: scenario.roleBlurbs[org][session.language],
+    blurb: scenario.roleBlurbs[org as keyof typeof scenario.roleBlurbs][session.language],
   })
   return {
     name: session.name,
     language: session.language,
+    gameId: session.gameId || 'logistics',
+    gameTitle: getGame(session.gameId).titles[session.language],
     free: session.roles.filter((role) => !role.playerUserId).map((role) => describe(role.organizationId)),
     roles: session.roles.map((role) => ({ ...describe(role.organizationId), free: !role.playerUserId })),
     role: organizationId ?? null,

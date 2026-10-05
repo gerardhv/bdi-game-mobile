@@ -59,4 +59,20 @@ describe('session isolation', () => {
     })
     expect(other.status).toBe(200)
   })
+
+  it('lists catalog games and creates a session for a gameId', async () => {
+    const { app } = createApp(new MemoryStore())
+    const catalog = await (await app.request('/api/games')).json() as { games: { id: string }[] }
+    expect(catalog.games.some((game) => game.id === 'logistics')).toBe(true)
+    const host = await client(app)
+    const created = await app.request('/api/sessions', {
+      method: 'POST',
+      headers: host.headers,
+      body: JSON.stringify({ name: 'Catalog', gameId: 'logistics' }),
+    })
+    expect(created.status).toBe(200)
+    const body = await created.json() as { gameId: string; gameTitle: string }
+    expect(body.gameId).toBe('logistics')
+    expect(body.gameTitle).toBeTruthy()
+  })
 })

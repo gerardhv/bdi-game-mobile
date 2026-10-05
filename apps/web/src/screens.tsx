@@ -10,17 +10,44 @@ export { Host } from './host/Host'
 export { Join } from './phone/Join'
 export { Play } from './phone/Play'
 
+type GameCard = {
+  id: string
+  version: number
+  titles: { nl: string; en: string }
+  blurbs: { nl: string; en: string }
+  startModes: ('without_bdi' | 'only_bdi')[]
+}
+
 export function Home() {
   const navigate = useNavigate()
   const [code, setCode] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [games, setGames] = useState<GameCard[] | null>(null)
+  const [gameId, setGameId] = useState<string | null>(null)
   const lang = storedLang()
   const t = tr(lang)
+  const selected = games?.find((game) => game.id === gameId) ?? null
+
+  useEffect(() => {
+    void fetch(apiUrl('/api/games'))
+      .then(async (response) => {
+        if (!response.ok) throw new Error(t.offline)
+        const body = await response.json() as { games: GameCard[] }
+        setGames(body.games)
+        if (body.games.length === 1) setGameId(body.games[0].id)
+      })
+      .catch(() => setError(t.offline))
+  }, [t.offline])
+
   async function create(startMode: 'without_bdi' | 'only_bdi') {
+    if (!gameId) return
     setBusy(true)
     try {
-      const view = await api<Training>('/api/sessions', { method: 'POST', body: JSON.stringify({ language: lang, startMode }) })
+      const view = await api<Training>('/api/sessions', {
+        method: 'POST',
+        body: JSON.stringify({ language: lang, startMode, gameId }),
+      })
       const path = withSlot(`/host/${view.sessionId}`)
       if (window.top && window.top !== window) {
         window.top.location.hash = `#${path}`
@@ -32,6 +59,7 @@ export function Home() {
       setBusy(false)
     }
   }
+
   async function join(event: React.FormEvent) {
     event.preventDefault()
     const response = await fetch(apiUrl(`/api/join?code=${encodeURIComponent(code)}`)).catch(() => null)
@@ -41,15 +69,45 @@ export function Home() {
     }
     navigate(withSlot(`/join?code=${encodeURIComponent(code)}`))
   }
+
   return (
     <main className="home">
       <section className="home-card">
         <Wordmark />
         <h1>{t.tagline}</h1>
-        <div className="home-roles" aria-hidden="true">{ORGS.map((org) => <RoleIcon key={org} org={org} />)}</div>
-        <button type="button" className="btn go" data-testid="start-session" disabled={busy} onClick={() => void create('without_bdi')}>{t.newGame}</button>
-        <button type="button" className="btn" disabled={busy} onClick={() => void create('only_bdi')}>{t.onlyBdi}</button>
-        <Link className="btn ghost" to="/table?slot=host">{t.allRoles}</Link>
+        {!selected && (
+          <>
+            <p className="home-sub">{t.chooseGame}</p>
+            <div className="game-list" data-testid="game-list">
+              {(games ?? []).map((game) => (
+                <button
+                  key={game.id}
+                  type="button"
+                  className="btn game-card"
+                  data-testid={`game-${game.id}`}
+                  onClick={() => setGameId(game.id)}
+                >
+                  <strong>{game.titles[lang]}</strong>
+                  <span>{game.blurbs[lang]}</span>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+        {selected && (
+          <>
+            <div className="home-roles" aria-hidden="true">{ORGS.map((org) => <RoleIcon key={org} org={org} />)}</div>
+            <p className="home-sub"><strong>{selected.titles[lang]}</strong> — {selected.blurbs[lang]}</p>
+            {(games?.length ?? 0) > 1 && (
+              <button type="button" className="btn ghost" onClick={() => setGameId(null)}>{t.backToGames}</button>
+            )}
+            <button type="button" className="btn go" data-testid="start-session" disabled={busy} onClick={() => void create('without_bdi')}>{t.newGame}</button>
+            {selected.startModes.includes('only_bdi') && (
+              <button type="button" className="btn" disabled={busy} onClick={() => void create('only_bdi')}>{t.onlyBdi}</button>
+            )}
+            <Link className="btn ghost" to={`/table?game=${encodeURIComponent(selected.id)}&slot=host`}>{t.allRoles}</Link>
+          </>
+        )}
         <div className="divider" />
         <form onSubmit={(event) => void join(event)}>
           <label className="field">
@@ -99,6 +157,8 @@ export function Settings() {
 export function TestTable() {
   const navigate = useNavigate()
   const { sessionId = '' } = useParams()
+  const [params] = useSearchParams()
+  const gameId = params.get('game') ?? 'logistics'
   const [view, setView] = useState<Training | null>(null)
   const [phones, setPhones] = useState<{ label: string; src: string }[] | null>(null)
   const creating = useRef(false)
@@ -106,9 +166,12 @@ export function TestTable() {
   useEffect(() => {
     if (sessionId || creating.current) return
     creating.current = true
-    void api<Training>('/api/sessions', { method: 'POST', body: JSON.stringify({ name: t.allRoles, language: storedLang(), startMode: 'without_bdi' }) })
+    void api<Training>('/api/sessions', {
+      method: 'POST',
+      body: JSON.stringify({ name: t.allRoles, language: storedLang(), startMode: 'without_bdi', gameId }),
+    })
       .then((created) => navigate(`/table/${created.sessionId}?slot=host`, { replace: true }))
-  }, [navigate, sessionId, t.allRoles])
+  }, [navigate, sessionId, t.allRoles, gameId])
   useEffect(() => {
     if (!sessionId || view) return
     void api<Training>(`/api/sessions/${sessionId}/training`).then(setView)

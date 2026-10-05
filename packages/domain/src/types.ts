@@ -1,11 +1,8 @@
-export const ORGS = ['buyer', 'seller', 'carrier', 'delivery'] as const
-export type OrgId = (typeof ORGS)[number]
+export type OrgId = string
+export type StepId = string
+export type ResourceType = string
 
-export const STEPS = [
-  'S00', 'S01', 'S02', 'S03', 'S04', 'S05', 'S06', 'S07', 'S08', 'S09',
-  'S10', 'S11', 'S12', 'S13', 'S14', 'S15', 'S16', 'S17', 'S18', 'S19', 'S20',
-] as const
-export type StepId = (typeof STEPS)[number]
+export { ORGS, STEPS } from './games/logistics/orgs.js'
 
 export type RoundMode = 'without_bdi' | 'with_bdi'
 export type StartMode = 'without_bdi' | 'only_bdi'
@@ -14,10 +11,6 @@ export type GameState =
   | 'LOBBY' | 'INTRO' | 'ORDER' | 'SUBSCRIPTIONS' | 'ORDER_CONFIRMATION'
   | 'PLANNING' | 'PICKUP' | 'LINEHAUL' | 'TRANSFER' | 'LAST_MILE'
   | 'DISRUPTION' | 'DELIVERY' | 'ROUND_REVIEW' | 'COMPARISON' | 'CLOSED'
-
-export type ResourceType =
-  | 'order' | 'acceptance' | 'execution' | 'driver' | 'eta'
-  | 'etaConfirmation' | 'promise' | 'receipt'
 
 export type PolicyAction = 'publish' | 'subscribe' | 'notify' | 'read'
 
@@ -226,6 +219,8 @@ export interface SessionState {
   id: string
   code: string
   name: string
+  /** Catalog id of the game pack (e.g. logistics). Missing on old saves → treat as logistics. */
+  gameId: string
   hostUserId: string
   status: 'lobby' | 'running' | 'paused' | 'closed'
   language: Language

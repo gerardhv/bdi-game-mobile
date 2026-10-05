@@ -1,15 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api, phoneBase } from '../api'
+import { hostPackFor } from '../games/registry'
 import { tr, useDocumentLang } from '../i18n'
 import { useLive } from '../live'
-import { MapView } from '../Map'
 import { play, setSoundEnabled, soundEnabled, unlockAudio } from '../sound'
 import { ORGS, type Training } from '../types'
 import { Caption, FullscreenIcon, SettingsIcon, VolumeIcon, Wordmark } from '../ui'
 import { CommStrip, EventsCard, RegistryCard } from './CommStrip'
 import { Comparison } from './Comparison'
-import { Explainer } from './Explainer'
 import { Lobby } from './Lobby'
 import { ManageDrawer, type ManageAction } from './ManageDrawer'
 import { QuestionCard } from './QuestionCard'
@@ -143,6 +142,7 @@ export function Host() {
   }
 
   const t = tr(view.language)
+  const pack = hostPackFor(view.gameId)
   const round = view.round
   const reviewing = review != null && reviewIndex >= 0
   const frame = reviewing ? history[reviewIndex].frame : round?.frame
@@ -153,6 +153,8 @@ export function Host() {
   const nextRound = round && round.stepId === 'S20' && round.mode === 'without_bdi' && !view.comparison
     ? () => void post('start')
     : null
+  const MapView = pack.MapView
+  const Explainer = pack.Explainer
 
   const toggleFullscreen = () => {
     if (document.fullscreenElement) void document.exitFullscreen()

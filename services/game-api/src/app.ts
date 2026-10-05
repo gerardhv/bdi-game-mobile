@@ -38,6 +38,7 @@ export function createApp(store: Store) {
     return c.json({ addresses })
   })
   app.post('/api/dev/anonymous', async (c) => c.json(await game.anonymous()))
+  app.get('/api/games', (c) => c.json({ games: game.listGames() }))
   app.post('/api/sessions', async (c) => c.json(await game.create(await user(c), await c.req.json(), clientIp(c))))
   app.get('/api/join', async (c) => c.json(await game.joinPreview(c.req.query('code') ?? '')))
   app.get('/api/sessions/:id/training', async (c) => c.json(await game.training(c.req.param('id'), await user(c))))

@@ -44,6 +44,8 @@ export type BdiChain = { publisher: Org; subscribers: Org[]; eventType: string; 
 export type Training = {
   sessionId: string
   sessionName: string
+  gameId: string
+  gameTitle: string
   code: string
   language: 'nl' | 'en'
   status: string
@@ -88,6 +90,7 @@ export type Training = {
 export type Player = {
   sessionId: string
   sessionName: string
+  gameId: string
   code: string
   language: 'nl' | 'en'
   role: Org

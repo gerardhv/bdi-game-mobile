@@ -2,12 +2,18 @@
 
 Vier lagen:
 
-1. Spelbesturing in `packages/domain`: stappen, validatie, presentatietimer en scenario.
-2. Vertrouwenscontext: lidmaatschap, transportrollen en het spelbeleid in `policy.ts`.
+1. Spelbesturing in `packages/domain`: gedeelde engine plus game packs (stappen, scenario, policy).
+2. Vertrouwenscontext: lidmaatschap, transportrollen en het spelbeleid in het actieve pack (`games/logistics/policy.ts`).
 3. Organisatiediensten `buyer-data`, `seller-data`, `carrier-data` en `delivery-data`, aangesproken via `/api/data/:org/:type/:id`.
 4. Trainingsprojectie, alleen voor de host, via `/api/sessions/:id/training`.
 
 De HTTP-server staat in `services/game-api`. Elke spelhandeling is één aanroep op een gekloonde sessie die daarna atomair wordt opgeslagen. Clients sturen geen rol als bewijs; de server leidt de speler af uit het token.
+
+## Engine en game packs
+
+`SessionState.gameId` wijst naar een pack in `catalog.ts` (nu alleen `logistics`). De entree haalt `GET /api/games` op; `POST /api/sessions` stuurt `gameId` mee. Domain-inhoud per pack leeft onder `packages/domain/src/games/<id>/`. Host-visuals per pack onder `apps/web/src/games/<id>/`, gekozen via `hostPackFor(gameId)`.
+
+Idle-cleanup, IP-sessielimiet en debounced Postgres-flush horen bij de engine/API, niet bij een pack. Zie ook [games/README.md](games/README.md).
 
 ## Opslag
 

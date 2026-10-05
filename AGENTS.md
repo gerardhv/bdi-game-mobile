@@ -4,13 +4,14 @@ Guidance for AI coding agents working in this repository. Human-facing docs are 
 
 ## What this is
 
-An educational multiplayer game about data sharing in a logistics chain, played twice: without BDI and with BDI (notifications plus authorized reads at the source). One host screen (beamer) and four phones, one per role: `buyer`, `seller`, `carrier`, `delivery`. All organisations and data are fictional.
+An educational multiplayer platform for BDI teaching games. Games share one skeleton (host beamer + phones, claim/ready, without→with BDI, policy on every read). The first pack is the logistics chain (`gameId: logistics`): four roles `buyer`, `seller`, `carrier`, `delivery`. All organisations and data are fictional.
 
 Read before changing behaviour:
 
-- `docs/gameplay.md`: steps S00–S20, rounds, the traffic jam.
+- `docs/gameplay.md` / `docs/games/`: packs and the logistics script (S00–S20, traffic jam).
+- `docs/games/README.md`: how to add a game pack.
 - `docs/bdi-model.md`: what BDI means in this game (membership ≠ read right, policy checked on every read).
-- `docs/architecture.md`: storage, realtime, clock, identity.
+- `docs/architecture.md`: storage, realtime, clock, identity, engine vs packs.
 - `docs/design-decisions.md`: deliberate deviations from the spec. Add new ones here.
 - `docs/remake-prompt.md`: the original functional spec (Dutch). It is gitignored, so it may be absent; if present it is leading for game rules.
 
@@ -34,9 +35,9 @@ Definition of done for a change: `npm run typecheck` and `npm test` pass. Run `n
 
 | Path | Role |
 | --- | --- |
-| `packages/domain` | All game rules. Pure TypeScript, no I/O. Imported as `@bdi/domain` (source, no build step). |
+| `packages/domain` | Engine + game packs. Pure TypeScript, no I/O. Imported as `@bdi/domain` (source, no build step). |
 | `services/game-api` | Hono HTTP server on Node. Auth, persistence, SSE, 500 ms tick loop. |
-| `apps/web` | React 19 + Vite SPA with a hash router. Host screens in `src/host`, phone screens in `src/phone`. |
+| `apps/web` | React 19 + Vite SPA with a hash router. Shell in `src/host` / `src/phone`; pack UI in `src/games/<id>`. |
 | `e2e` | Playwright acceptance tests; one browser context per role. |
 | `scripts` | Local helpers (`seed-session.mjs`, `open-sessions.mjs`, `check-bundle.mjs`). |
 | `supabase` | Local Supabase config and the `session_documents` migration. |
@@ -44,13 +45,12 @@ Definition of done for a change: `npm run typecheck` and `npm test` pass. Run `n
 
 ### Domain (`packages/domain/src`)
 
-- `types.ts`: `SessionState` (one document per session), `RoundState`, `GameError`, `STEPS`, `ORGS`.
-- `dispatch.ts`: `dispatch(session, command, ctx)` is the single reducer; `Command` is the union of all commands. `createSession`, `blankRound`, `readSource`.
-- `steps.ts`: per-step actor (`STEP_ACTOR`), coarse state (`COARSE`), prompts, options, expected answers, `nextStepId` (S02 only exists with BDI).
-- `policy.ts`: `POLICY_RULES`, `authorize`, `minimalPayload`, subscriptions, and `t(language, nl, en)` for bilingual strings.
+- `types.ts`: `SessionState` (includes `gameId`), `RoundState`, `GameError`; `OrgId`/`StepId` are strings.
+- `catalog.ts` / `game-definition.ts`: registered packs; `getGame`, `listGames`.
+- `games/logistics/`: logistics content (`scenario`, `steps`, `policy`, `definition`); public API re-exports these from `index.ts`.
+- `dispatch.ts`: `dispatch(session, command, ctx)` is the single reducer; `createSession` takes `gameId`.
 - `project.ts`: BDI pipeline (publish → outbox → notify → fetch), knowledge panels, frames.
 - `views.ts`: `trainingView` (host only) and `playerView` (one role). These are the only shapes that leave the server.
-- `scenario.ts`: fictional data (products, drivers, ETAs, times).
 
 ### API (`services/game-api/src`)
 
@@ -65,7 +65,7 @@ Definition of done for a change: `npm run typecheck` and `npm test` pass. Run `n
 2. **`dispatch` returns a new state.** It `structuredClone`s the input; never mutate a session outside `store.run()`.
 3. **Identity comes from the token, never from the body.** Routes set `userId` from `userFromAuth(...)`. Build commands field by field; do not spread `c.req.json()` into a command.
 4. **No answer leaks to players.** `playerView` exposes only the player's own sources and, in the BDI round, authorized received data. Never add `scenarioSeed`, expected values or other roles' sources to a player view. `trainingView` is host-only (checked in `GameService.training`) and must not expose invite tokens of claimed roles.
-5. **BDI rules live in `policy.ts`.** Every read goes through `authorize` at the source; being a member or having a transport role is not a read right. Notifications carry minimal metadata; payloads are fetched separately.
+5. **BDI rules live in the active pack’s policy (today `games/logistics/policy.ts`).** Every read goes through `authorize` at the source; being a member or having a transport role is not a read right. Notifications carry minimal metadata; payloads are fetched separately.
 6. **Server time drives everything.** The client animates from `phaseEnteredAt`, `dueAt` and `serverNow`; it never advances the game itself. Pausing shifts all deadlines so pause time is not counted as decision time.
 7. **One API instance.** Memory is the source of truth; Postgres is a write-behind copy loaded at boot. Do not introduce designs that assume multiple instances or serverless functions without redesigning storage first.
 8. **Secrets stay server-side.** Only `VITE_*` variables reach the browser. Never put `AUTH_SECRET`, `INTERNAL_TICK_SECRET` or a Supabase `service_role` key in a `VITE_*` variable; `check:bundle` guards this.

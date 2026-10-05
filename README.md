@@ -1,8 +1,8 @@
 # BDI Game
 
-Educatieve multiplayer over een logistieke keten, eerst zonder BDI en daarna met gerichte meldingen en bronopvraging. Eén beamerscherm en vier telefoons: koper, verkoper, vervoerder en bezorger. Fictieve organisaties, geen aansluiting op echte BDI-registers.
+Educatief multiplayer-platform voor BDI-lesspellen. Games delen één skelet (beamer + telefoons, zonder→met BDI). Het eerste pack is de logistieke keten: koper, verkoper, vervoerder en bezorger — fictieve organisaties, geen aansluiting op echte BDI-registers. Op de entree kies je welk spel je start; packs staan beschreven in [docs/games/](docs/games/).
 
-De beamer toont een eiland met wegen waarover de lading rijdt, een vraagkaart met grote tegels, per rol wat die partij weet, en in de BDI-ronde de keten melding → toegang gecontroleerd → gegevens opgehaald → beschikbaar → bevestigd. De telefoon is een controller in de kleur van de rol: opdracht, eigen dossier en meldingen. Alleen de beamer maakt geluid.
+De beamer toont een eiland met wegen waarover de lading rijdt, een vraagkaart met grote tegels, per rol wat die partij weet, en in de BDI-ronde de keten melding → toegang gecontroleerd → gegevens opgehaald → beschikbaar → bevestigd. De telefoon is een controller in de kleur van de rol: opdracht, meldingen en eigen dossier. Alleen de beamer maakt geluid.
 
 ## Draaien: lokaal of in de cloud
 

@@ -4,11 +4,14 @@ export type Lang = 'nl' | 'en'
 
 const nl = {
   tagline: 'Een spel over gegevens delen in de logistieke keten',
+  chooseGame: 'Kies een spel',
+  backToGames: 'Andere spellen',
   newGame: 'Nieuw spel',
   onlyBdi: 'Direct de BDI-ronde',
   allRoles: 'Alle rollen op deze computer',
   joinWithCode: 'Deelnemen met sessiecode',
   join: 'Deelnemen',
+  gameLabel: 'Spel',
   settings: 'Instellingen',
   unknownCode: 'Onbekende code',
   back: 'Terug',
@@ -146,11 +149,14 @@ type Dict = typeof nl
 
 const en: Dict = {
   tagline: 'A game about sharing data in the logistics chain',
+  chooseGame: 'Choose a game',
+  backToGames: 'Other games',
   newGame: 'New game',
   onlyBdi: 'Start with the BDI round',
   allRoles: 'All roles on this computer',
   joinWithCode: 'Join with session code',
   join: 'Join',
+  gameLabel: 'Game',
   settings: 'Settings',
   unknownCode: 'Unknown code',
   back: 'Back',

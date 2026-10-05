@@ -1,9 +1,9 @@
-import { authorize, minimalPayload, sourceRef, subscriptionsFor, t } from './policy.js'
-import { driverName, etaLabel, labelOf, orgName, parseTime, roleLabel, scenario } from './scenario.js'
+import { authorize, minimalPayload, sourceRef, subscriptionsFor, t } from './games/logistics/policy.js'
+import { driverName, etaLabel, labelOf, orgName, parseTime, roleLabel, scenario } from './games/logistics/scenario.js'
 import {
   activeOrg, activityLabel, askRole, expectedValue, hintFor, isConfirm, mismatchText, narrative, promptFor, shuffledOptions, STEP_ACTOR,
-} from './steps.js'
-import type { KnowledgePanel, Language, OrgId, PanelItem, RoundState, SourceResource, TrainingFrame } from './types.js'
+} from './games/logistics/steps.js'
+import { ORGS, type KnowledgePanel, type Language, type OrgId, type PanelItem, type RoundState, type SourceResource, type TrainingFrame } from './types.js'
 
 function statusLabel(status: PanelItem['status'], language: Language): string {
   const nl = {
@@ -87,7 +87,7 @@ function panelItems(round: RoundState, org: OrgId, language: Language): PanelIte
 }
 
 export function knowledgePanels(round: RoundState, language: Language): KnowledgePanel[] {
-  return (['buyer', 'seller', 'carrier', 'delivery'] as OrgId[]).map((org) => ({
+  return ORGS.map((org) => ({
     organizationId: org,
     name: orgName(org, language),
     roleLabel: roleLabel(org, language),

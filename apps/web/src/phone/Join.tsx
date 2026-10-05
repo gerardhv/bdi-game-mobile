@@ -8,6 +8,8 @@ type Preview = {
   sessionId: string
   name: string
   language: 'nl' | 'en'
+  gameId: string
+  gameTitle: string
   free: { organizationId: Org; roleLabel: string; name: string; blurb: string }[]
   roles: { organizationId: Org; roleLabel: string; name: string; blurb: string; free: boolean }[]
 }
@@ -71,7 +73,7 @@ export function Join() {
   return (
     <main className="join-screen">
       <section className="join-card" style={card ? ({ '--role': `var(--${card.organizationId})` } as CSSProperties) : undefined}>
-        <small className="org">{t.session} · {preview?.name ?? code}</small>
+        <small className="org">{t.session} · {preview?.name ?? code}{preview?.gameTitle ? ` · ${preview.gameTitle}` : ''}</small>
         {card ? (
           <>
             <RoleIcon org={card.organizationId} className="big-icon" />

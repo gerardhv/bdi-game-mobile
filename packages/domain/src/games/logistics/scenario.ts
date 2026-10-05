@@ -1,4 +1,5 @@
-import type { Language, OrgId } from './types.js'
+import type { Language, OrgId } from '../../types.js'
+import type { LogisticsOrgId } from './orgs.js'
 
 export interface Named {
   id: string
@@ -26,13 +27,13 @@ export const scenario = {
     seller: { nl: 'Havenlicht Electronics', en: 'Havenlicht Electronics', color: '#C46B2C' },
     carrier: { nl: 'Dijklijn Transport', en: 'Dijklijn Transport', color: '#2E7D4F' },
     delivery: { nl: 'Morgenpost Logistiek', en: 'Morgenpost Logistiek', color: '#6B4C9A' },
-  } satisfies Record<OrgId, { nl: string; en: string; color: string }>,
+  } satisfies Record<LogisticsOrgId, { nl: string; en: string; color: string }>,
   roleLabels: {
     buyer: { nl: 'Koper', en: 'Buyer' },
     seller: { nl: 'Verkoper', en: 'Seller' },
     carrier: { nl: 'Vervoerder', en: 'Carrier' },
     delivery: { nl: 'Bezorger', en: 'Delivery' },
-  } satisfies Record<OrgId, { nl: string; en: string }>,
+  } satisfies Record<LogisticsOrgId, { nl: string; en: string }>,
   roleBlurbs: {
     buyer: {
       nl: 'Bestelt het product en ontvangt de lading op een beveiligd terrein.',
@@ -50,7 +51,7 @@ export const scenario = {
       nl: 'Slaat de lading over en levert af bij de koper.',
       en: 'Transships the load and delivers it to the buyer.',
     },
-  } satisfies Record<OrgId, { nl: string; en: string }>,
+  } satisfies Record<LogisticsOrgId, { nl: string; en: string }>,
   products: [
     { id: 'camera', nl: 'Camera', en: 'Camera' },
     { id: 'phone', nl: 'Telefoon', en: 'Phone' },
@@ -87,11 +88,13 @@ export const scenario = {
 }
 
 export function orgName(org: OrgId, language: Language): string {
-  return scenario.organizations[org][language]
+  const entry = scenario.organizations[org as LogisticsOrgId]
+  return entry?.[language] ?? org
 }
 
 export function roleLabel(org: OrgId, language: Language): string {
-  return scenario.roleLabels[org][language]
+  const entry = scenario.roleLabels[org as LogisticsOrgId]
+  return entry?.[language] ?? org
 }
 
 export function labelOf(items: { id: string; nl: string; en: string }[], id: string, language: Language): string {

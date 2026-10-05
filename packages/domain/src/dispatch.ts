@@ -1,14 +1,16 @@
 import { catchUp, highlightFor, processOutbox, publishResource, stageFetch } from './project.js'
-import { etaLabel, orgName, parseTime, revisedEtas, roleLabel, scenario } from './scenario.js'
+import { etaLabel, orgName, parseTime, revisedEtas, roleLabel, scenario } from './games/logistics/scenario.js'
 import {
   COARSE, expectedValue, isChoose, isConfirm, mismatchText, narrative, nextStepId, optionsFor, promptFor, shuffledOptions, STEP_ACTOR,
-} from './steps.js'
-import { authorize, minimalPayload, subscriptionsFor } from './policy.js'
+} from './games/logistics/steps.js'
+import { authorize, minimalPayload, subscriptionsFor } from './games/logistics/policy.js'
 import type { Ctx } from './runtime.js'
 import {
-  GameError, ORGS, type Language, type OrgId, type RoundState, type SessionState, type SourceResource, type StepId, type TrainingFrame,
+  GameError, type Language, type OrgId, type RoundState, type SessionState, type SourceResource, type StepId, type TrainingFrame,
 } from './types.js'
 import { buildFrame } from './project.js'
+import { DEFAULT_GAME_ID, getGame } from './catalog.js'
+import { orgIds } from './game-definition.js'
 
 function iso(ms: number): string {
   return new Date(ms).toISOString()
@@ -298,13 +300,17 @@ export function createSession(input: {
   startMode: SessionState['startMode']
   now: string
   expiresAt: string
-  invites: Record<OrgId, string>
+  invites: Record<string, string>
   creatorIp?: string | null
+  gameId?: string
 }): SessionState {
+  const game = getGame(input.gameId)
+  const orgs = orgIds(game)
   return {
     id: input.id,
     code: input.code,
     name: input.name,
+    gameId: game.id,
     hostUserId: input.hostUserId,
     status: 'lobby',
     language: input.language,
@@ -316,7 +322,7 @@ export function createSession(input: {
     currentRoundId: null,
     comparison: false,
     creates: [],
-    roles: ORGS.map((org) => ({
+    roles: orgs.map((org) => ({
       organizationId: org,
       playerUserId: null,
       displayName: null,
@@ -328,6 +334,15 @@ export function createSession(input: {
     })),
     rounds: [],
   }
+}
+
+/** Ensure loaded documents have gameId (older saves omitted it). */
+export function ensureSessionGame(session: SessionState): SessionState {
+  if (session.gameId) {
+    getGame(session.gameId)
+    return session
+  }
+  return { ...session, gameId: DEFAULT_GAME_ID }
 }
 
 export function blankRound(input: {
@@ -514,7 +529,10 @@ function startRound(state: SessionState, command: Extract<Command, { type: 'star
   if (active?.stepId === 'S20' && active.number >= 2) throw new GameError('bad_step', 'Beide rondes zijn gespeeld.', 409)
   if (!active) {
     const ready = state.roles.filter((role) => role.playerUserId && role.ready)
-    if (new Set(ready.map((role) => role.organizationId)).size !== 4) throw new GameError('not_ready', 'Vier rollen moeten gereed zijn.', 409)
+    const needed = orgIds(getGame(state.gameId)).length
+    if (new Set(ready.map((role) => role.organizationId)).size !== needed) {
+      throw new GameError('not_ready', 'Alle rollen moeten gereed zijn.', 409)
+    }
   }
   const mode = !active ? (state.startMode === 'only_bdi' ? 'with_bdi' : 'without_bdi') : 'with_bdi'
   const round = blankRound({
@@ -579,7 +597,7 @@ function submitAction(state: SessionState, command: Extract<Command, { type: 'su
     }
     catchUp(round, org, ctx.now)
     round.attempts.push({ actionId: command.actionId, stepId: 'S02', userId: command.userId, value: 'subscribe', outcome: 'accepted', at: ctx.now })
-    const done = ORGS.every((item) => round.subscriptions.some((sub) => sub.subscriber === item))
+    const done = orgIds(getGame(state.gameId)).every((item) => round.subscriptions.some((sub) => sub.subscriber === item))
     if (done) armPresentation(round, ctx, true)
     else round.stateVersion += 1
     pushEvent(round, ctx.language, { type: 'choice', text: ctx.language === 'nl' ? `${roleLabel(org, ctx.language)} abonneert op relevante orderinformatie` : `${roleLabel(org, ctx.language)} subscribes`, organizationId: org, at: ctx.now })
