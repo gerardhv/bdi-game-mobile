@@ -4,7 +4,7 @@ De specificatie vroeg Supabase Edge Functions. De spelregels staan in één Type
 
 Lokaal zonder Supabase krijgt elke browser een eigen ondertekend dev-token. Dat is een tijdelijke gebruikersidentiteit, niet de publieke projectsleutel. Zet `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `SUPABASE_URL` en `SUPABASE_ANON_KEY` om anonieme Supabase-login te gebruiken, en daarna `ALLOW_DEV_AUTH=false`.
 
-Met `DATABASE_URL` bewaart de API elke sessie in de Postgres-tabel `session_documents`. Zonder die variabele blijft het een lokaal JSON-bestand.
+Met `DATABASE_URL` bewaart de API elke sessie in de Postgres-tabel `session_documents`. Zonder die variabele blijft het een lokaal JSON-bestand. Schrijven naar Postgres gebeurt niet na elke tick of heartbeat: wijzigingen worden gebundeld (`PERSIST_INTERVAL_MS`, standaard 15 s). Nieuwe en gesloten sessies gaan meteen weg. Dat voorkomt dat Render Free op bandbreedte vastloopt door continue upserts naar Supabase.
 
 Hosting: website op Vercel, API op Render, opslag in Supabase Postgres. De repository is privé, dus GitHub Pages valt af. De API draait niet als Vercel Function omdat hij één langlopend proces is: sessies in het geheugen, een tik elke 500 ms en open SSE-verbindingen. Dat vraagt één vaste instantie, geen kortlevende functies. Met hooguit drie spellen van vijf deelnemers tegelijk is één gratis Render-instantie ruim genoeg; hoge beschikbaarheid is geen doel. Postgres is nodig omdat Render Free slaapt en geen blijvende schijf heeft. Zie [deployment.md](deployment.md).
 

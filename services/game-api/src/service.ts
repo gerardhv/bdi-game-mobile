@@ -13,6 +13,11 @@ export class MemoryStore implements Store {
   private sessions = new Map<string, SessionState>()
   private chain: Promise<unknown> = Promise.resolve()
   private file = process.env.GAME_FILE
+  /** Pending sessions for the remote (Postgres) writer; local file flush stays immediate. */
+  private pendingRemote = new Map<string, SessionState>()
+  private flushTimer: ReturnType<typeof setTimeout> | null = null
+  private flushChain: Promise<void> = Promise.resolve()
+  private persistIntervalMs = Math.max(1000, Number(process.env.PERSIST_INTERVAL_MS) || 15_000)
   onFlush: ((sessions: SessionState[]) => Promise<void>) | null = null
   replaceAll(sessions: SessionState[]) {
     this.sessions = new Map(sessions.map((session) => [session.id, session]))
@@ -26,10 +31,31 @@ export class MemoryStore implements Store {
       /* first run */
     }
   }
-  private flush() {
+  private flushFile() {
     if (!this.file) return
     mkdirSync(this.file.replace(/[\\/][^\\/]+$/, ''), { recursive: true })
     writeFileSync(this.file, JSON.stringify([...this.sessions.values()]))
+  }
+  private scheduleRemoteFlush() {
+    if (!this.onFlush || this.flushTimer) return
+    this.flushTimer = setTimeout(() => {
+      this.flushTimer = null
+      void this.flushNow()
+    }, this.persistIntervalMs)
+  }
+  /** Push pending sessions through onFlush now (new/closed sessions, shutdown, tests). */
+  async flushNow(): Promise<void> {
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer)
+      this.flushTimer = null
+    }
+    this.flushChain = this.flushChain.then(async () => {
+      if (!this.onFlush || this.pendingRemote.size === 0) return
+      const batch = [...this.pendingRemote.values()]
+      this.pendingRemote.clear()
+      await this.onFlush(batch)
+    })
+    return this.flushChain
   }
   async run<T>(fn: (db: { get: (id: string) => SessionState | null; byCode: (code: string) => SessionState | null; save: (s: SessionState) => void; list: () => SessionState[] }) => T): Promise<T> {
     const run = this.chain.then(async () => {
@@ -44,9 +70,17 @@ export class MemoryStore implements Store {
         list: () => [...this.sessions.values()].map((s) => structuredClone(s)),
       }
       const result = await fn(db)
-      for (const [id, session] of dirty) this.sessions.set(id, session)
-      this.flush()
-      if (this.onFlush && dirty.size > 0) await this.onFlush([...dirty.values()])
+      let urgent = false
+      for (const [id, session] of dirty) {
+        if (!this.sessions.has(id) || session.status === 'closed') urgent = true
+        this.sessions.set(id, session)
+        if (this.onFlush) this.pendingRemote.set(id, session)
+      }
+      this.flushFile()
+      if (this.onFlush && dirty.size > 0) {
+        if (urgent) await this.flushNow()
+        else this.scheduleRemoteFlush()
+      }
       return result
     })
     this.chain = run.then(() => undefined, () => undefined)
@@ -192,8 +226,9 @@ export class GameService {
       for (const session of db.list()) {
         if (session.status === 'closed') continue
         try {
+          const before = JSON.stringify(session)
           const result = dispatch(session, { type: 'tick' }, runtime(session.language))
-          db.save(result.state)
+          if (JSON.stringify(result.state) !== before) db.save(result.state)
         } catch {
           /* expired sessions stop on the next claim */
         }

@@ -15,3 +15,10 @@ setInterval(() => { void game.tickAll() }, 500)
 serve({ fetch: app.fetch, port }, () => {
   console.log(`BDI game API on http://localhost:${port}`)
 })
+
+const shutdown = (signal: string) => {
+  console.log(`${signal}: pending sessions wegschrijven…`)
+  void store.flushNow().finally(() => process.exit(0))
+}
+process.on('SIGINT', () => shutdown('SIGINT'))
+process.on('SIGTERM', () => shutdown('SIGTERM'))
