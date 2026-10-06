@@ -7,6 +7,7 @@ Dit platform ondersteunt meerdere BDI-games met hetzelfde speelskelet (beamer + 
 | Id | Docs |
 | --- | --- |
 | `logistics` | [logistics.md](logistics.md) |
+| `access` | [access.md](access.md) |
 
 ## Nieuw pack toevoegen
 

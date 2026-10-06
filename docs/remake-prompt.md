@@ -455,6 +455,17 @@ Bewijs onderstaande gevallen met passende unit-, integratie- en browsertests. Ge
 
 Controleer vóór afronding de teksten en implementatie nog eenmaal inhoudelijk: BDI blijft een afsprakenstelsel; Association-deelname, transportrol en toestemming zijn gescheiden; de bron beslist over toegang; notificaties en payloads zijn onderscheiden; operationele gegevens worden bron-naar-afnemer opgehaald; de spelleider is geen logistieke data-eigenaar; Orchestration Registry is niet de centrale procesmotor.
 
+## 30. Tweede spelpack: Wie mag deze gegevens zien? (`access`)
+
+Naast de logistieke keten (secties hierboven) hoort een tweede trainingsgame over toegang tot gegevens binnen **één** Association. Die pack deelt lobby, QR-rollen, pauze, tick en persistence met de basisgame, maar heeft een eigen story-reducer. Didactische eisen die leidend zijn:
+
+1. **Onboarding is eenmalig en op organisatieniveau.** Dossier → BVAD. Geen aparte applicatie- of systeemregistratie in deze basisgame. Maak de knip naar de herhalende cyclus **zichtbaar op de beamer** (fasenstrip), niet alleen in tekst.
+2. **Daarna herhaalt zich per handeling, in deze volgorde:** (a) Data Owner legt vast wie betrokken is / gegevens mag ophalen; (b) Data Owner stelt beleid in; (c) Data Consumer authenticatie; (d) verzoek waarbij de Data Service Provider beslist met identiteit, deelname, betrokkenheid en beleid.
+3. **Data Owner vóór authenticatie.** Betrokkenheid en beleid staan vast vóórdat de Data Consumer een digitaal middel kiest en de Data Service Provider authenticatie of data-toegang beoordeelt.
+4. **Beleid en toestemming blijven van de Data Owner.** Intrekken en herstellen van leesrecht gebeurt zonder nieuwe onboarding; eerder ontvangen gegevens blijven gelabeld zichtbaar.
+
+Rollen in deze pack: Association Admin, Data Owner, Data Service Provider, Data Consumer. Gedetailleerde speelstappen staan in `docs/games/access.md`.
+
 ## Potentiële uitbreidingen — niet automatisch uitvoeren
 
 **Deze sectie is uitsluitend een ideeënlijst. Implementeer, scaffold of activeer geen van deze functies zonder een afzonderlijke expliciete opdracht. Ook geen verborgen feature flags, lege menu's of database-uitbreidingen alvast toevoegen.**

@@ -1,3 +1,5 @@
+import type { AccessState } from './games/access/state.js'
+
 export type OrgId = string
 export type StepId = string
 export type ResourceType = string
@@ -5,7 +7,7 @@ export type ResourceType = string
 export { ORGS, STEPS } from './games/logistics/orgs.js'
 
 export type RoundMode = 'without_bdi' | 'with_bdi'
-export type StartMode = 'without_bdi' | 'only_bdi'
+export type StartMode = 'without_bdi' | 'only_bdi' | 'story'
 export type Language = 'nl' | 'en'
 export type GameState =
   | 'LOBBY' | 'INTRO' | 'ORDER' | 'SUBSCRIPTIONS' | 'ORDER_CONFIRMATION'
@@ -234,6 +236,8 @@ export interface SessionState {
   roles: RoleAssignment[]
   rounds: RoundState[]
   currentRoundId: string | null
+  /** Story pack state (access). Null for logistics. */
+  access: AccessState | null
   comparison: boolean
   creates: { userId: string; at: string }[]
 }

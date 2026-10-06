@@ -104,6 +104,50 @@ export function createApp(store: Store) {
       expectedStateVersion: body.expectedStateVersion, actionId: body.actionId, value: body.value,
     }))
   })
+  app.post('/api/sessions/:id/access', async (c) => {
+    const body = await c.req.json() as Record<string, unknown>
+    const userId = await user(c)
+    const expectedVersion = Number(body.expectedVersion)
+    const actionId = String(body.actionId ?? '')
+    const kind = String(body.type ?? '')
+    const base = { userId, expectedVersion, actionId }
+    let command: import('@bdi/domain').Command
+    switch (kind) {
+      case 'submitDossier':
+        command = { type: 'accessSubmitDossier', ...base, orgIdentity: Boolean(body.orgIdentity), representative: Boolean(body.representative), terms: Boolean(body.terms) }
+        break
+      case 'dossierDecision':
+        command = { type: 'accessDossierDecision', ...base, decision: body.decision === 'return' ? 'return' : 'commit' }
+        break
+      case 'registerSystem':
+        command = { type: 'accessRegisterSystem', ...base, belongs: Boolean(body.belongs), endpoint: Boolean(body.endpoint), credential: Boolean(body.credential) }
+        break
+      case 'chooseCredential':
+        command = { type: 'accessChooseCredential', ...base, credentialId: body.credentialId === 'cred-expired' ? 'cred-expired' : 'cred-valid' }
+        break
+      case 'checkRequest':
+        command = { type: 'accessCheckRequest', ...base }
+        break
+      case 'registerCarrier':
+        command = { type: 'accessRegisterCarrier', ...base }
+        break
+      case 'checkProofs':
+        command = { type: 'accessCheckProofs', ...base }
+        break
+      case 'setPolicy':
+        command = { type: 'accessSetPolicy', ...base, shareLoading: Boolean(body.shareLoading), shareFinance: Boolean(body.shareFinance) }
+        break
+      case 'askCard':
+        command = { type: 'accessAskCard', ...base, cardId: body.cardId as 'load-T-101' | 'finance-T-101' | 'load-T-102' }
+        break
+      case 'predict':
+        command = { type: 'accessPredict', ...base, guess: body.guess === 'allow' ? 'allow' : 'deny' }
+        break
+      default:
+        return c.json({ error: 'unknown', message: 'Onbekende access-actie.' }, 400)
+    }
+    return c.json(await game.command(c.req.param('id'), userId, command))
+  })
   app.post('/api/sessions/:id/pause', async (c) => c.json(await game.command(c.req.param('id'), await user(c), { type: 'pause', userId: await user(c) })))
   app.post('/api/sessions/:id/resume', async (c) => c.json(await game.command(c.req.param('id'), await user(c), { type: 'resume', userId: await user(c) })))
   app.post('/api/sessions/:id/finish', async (c) => c.json(await game.command(c.req.param('id'), await user(c), { type: 'finishSession', userId: await user(c) })))

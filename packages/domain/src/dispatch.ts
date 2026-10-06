@@ -11,6 +11,10 @@ import {
 import { buildFrame } from './project.js'
 import { DEFAULT_GAME_ID, getGame } from './catalog.js'
 import { orgIds } from './game-definition.js'
+import {
+  pauseAccess, reduceAccess, releasePausesAccess, restartAccessGame, resumeAccess, startAccessGame, tickAccess,
+  type AccessCommand,
+} from './games/access/reduce.js'
 
 function iso(ms: number): string {
   return new Date(ms).toISOString()
@@ -333,16 +337,19 @@ export function createSession(input: {
       lastSeenAt: null,
     })),
     rounds: [],
+    access: null,
   }
 }
 
 /** Ensure loaded documents have gameId (older saves omitted it). */
 export function ensureSessionGame(session: SessionState): SessionState {
-  if (session.gameId) {
-    getGame(session.gameId)
-    return session
+  const withGame = session.gameId
+    ? (getGame(session.gameId), session)
+    : { ...session, gameId: DEFAULT_GAME_ID }
+  if (withGame.access === undefined) {
+    return { ...withGame, access: null }
   }
-  return { ...session, gameId: DEFAULT_GAME_ID }
+  return withGame
 }
 
 export function blankRound(input: {
@@ -474,6 +481,17 @@ export function dispatch(session: SessionState, command: Command, ctx: Ctx): { s
       return { state, output: retryFetch(state, command, ctx) }
     case 'updateLanguage':
       return { state, output: updateLanguage(state, command) }
+    case 'accessSubmitDossier':
+    case 'accessDossierDecision':
+    case 'accessRegisterSystem':
+    case 'accessChooseCredential':
+    case 'accessCheckRequest':
+    case 'accessRegisterCarrier':
+    case 'accessCheckProofs':
+    case 'accessSetPolicy':
+    case 'accessAskCard':
+    case 'accessPredict':
+      return { state, output: reduceAccess(state, command, ctx) }
     default:
       throw new GameError('unknown', 'Onbekende actie.', 400)
   }
@@ -510,6 +528,9 @@ function releaseRole(state: SessionState, command: Extract<Command, { type: 'rel
     const round = currentRound(state)
     round.paused = true
     round.pauseStartedAt = ctx.now
+  } else if (state.access) {
+    state.status = 'paused'
+    releasePausesAccess(state, ctx)
   }
   return { assignmentVersion: role.assignmentVersion, inviteToken: role.inviteToken }
 }
@@ -523,6 +544,9 @@ function markReady(state: SessionState, command: Extract<Command, { type: 'markR
 
 function startRound(state: SessionState, command: Extract<Command, { type: 'startRound' }>, ctx: Ctx): Record<string, unknown> {
   if (command.userId !== state.hostUserId) throw new GameError('forbidden', 'Alleen de spelleider start de ronde.', 403)
+  if (state.gameId === 'access') {
+    return startAccessGame(state, command.roundId, ctx)
+  }
   const active = state.rounds.find((round) => round.id === state.currentRoundId)
   if (active && active.stepId !== 'S20') throw new GameError('bad_step', 'De ronde loopt nog.', 409)
   if (active?.stepId === 'S20' && state.startMode === 'only_bdi') throw new GameError('bad_step', 'Er is geen tweede ronde.', 409)
@@ -684,7 +708,14 @@ function tick(state: SessionState, ctx: Ctx): Record<string, unknown> {
         round.pauseStartedAt = ctx.now
         round.metrics.disconnects += 1
       }
+      if (state.access && !state.access.paused) {
+        pauseAccess(state, ctx)
+        state.access.metrics.disconnects += 1
+      }
     }
+  }
+  if (state.gameId === 'access') {
+    return tickAccess(state, ctx)
   }
   const round = state.rounds.find((item) => item.id === state.currentRoundId)
   if (!round || round.paused || state.status === 'paused') return { paused: state.status === 'paused' }
@@ -698,6 +729,10 @@ function tick(state: SessionState, ctx: Ctx): Record<string, unknown> {
 function pause(state: SessionState, command: Extract<Command, { type: 'pause' }>, ctx: Ctx): Record<string, unknown> {
   if (command.userId !== state.hostUserId) throw new GameError('forbidden', 'Alleen de spelleider pauzeert.', 403)
   state.status = 'paused'
+  if (state.gameId === 'access' && state.access) {
+    pauseAccess(state, ctx)
+    return { paused: true }
+  }
   const round = state.rounds.find((item) => item.id === state.currentRoundId)
   if (round && !round.paused) {
     round.paused = true
@@ -708,6 +743,11 @@ function pause(state: SessionState, command: Extract<Command, { type: 'pause' }>
 
 function resume(state: SessionState, command: Extract<Command, { type: 'resume' }>, ctx: Ctx): Record<string, unknown> {
   if (command.userId !== state.hostUserId) throw new GameError('forbidden', 'Alleen de spelleider hervat.', 403)
+  if (state.gameId === 'access' && state.access) {
+    resumeAccess(state, ctx)
+    state.status = 'running'
+    return { paused: false }
+  }
   const round = state.rounds.find((item) => item.id === state.currentRoundId)
   if (round?.pauseStartedAt) {
     const delta = new Date(ctx.now).getTime() - new Date(round.pauseStartedAt).getTime()
@@ -737,6 +777,9 @@ function finish(state: SessionState, command: Extract<Command, { type: 'finishSe
 
 function restart(state: SessionState, command: Extract<Command, { type: 'restartRound' }>, ctx: Ctx): Record<string, unknown> {
   if (command.userId !== state.hostUserId) throw new GameError('forbidden', 'Alleen de spelleider begint de ronde opnieuw.', 403)
+  if (state.gameId === 'access') {
+    return restartAccessGame(state, command.roundId, ctx)
+  }
   const active = currentRound(state)
   state.rounds = state.rounds.filter((round) => round.id !== active.id)
   const round = blankRound({
@@ -758,6 +801,10 @@ function restart(state: SessionState, command: Extract<Command, { type: 'restart
 
 function markHelp(state: SessionState, command: Extract<Command, { type: 'markHelp' }>, ctx: Ctx): Record<string, unknown> {
   if (command.userId !== state.hostUserId) throw new GameError('forbidden', 'Alleen de spelleider markeert hulp.', 403)
+  if (state.access) {
+    state.access.helpCount += 1
+    return { help: state.access.helpCount }
+  }
   const round = currentRound(state)
   round.helpCount += 1
   round.metrics.helpActions += 1
@@ -766,6 +813,12 @@ function markHelp(state: SessionState, command: Extract<Command, { type: 'markHe
 }
 
 function saveNote(state: SessionState, command: Extract<Command, { type: 'saveNote' }>): Record<string, unknown> {
+  if (state.access) {
+    const org = roleOf(state, command.userId)
+    if (!org) throw new GameError('forbidden', 'Geen rol.', 403)
+    state.access.notes[command.userId] = command.text.slice(0, 500)
+    return { saved: true }
+  }
   const round = currentRound(state)
   const org = roleOf(state, command.userId)
   if (!org) throw new GameError('forbidden', 'Geen rol.', 403)
@@ -819,6 +872,7 @@ export type Command =
   | { type: 'heartbeat'; userId: string }
   | { type: 'retryFetch'; userId: string; sourceRef: string }
   | { type: 'updateLanguage'; userId: string; language: Language }
+  | AccessCommand
 
 function findByRef(round: RoundState, sourceRefValue: string): SourceResource | null {
   const [ownerRaw, type, id] = sourceRefValue.split('/')

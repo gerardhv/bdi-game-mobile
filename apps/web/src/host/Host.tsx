@@ -2,10 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api, phoneBase } from '../api'
 import { hostPackFor } from '../games/registry'
+import { AccessHost } from '../games/access'
 import { tr, useDocumentLang } from '../i18n'
 import { useLive } from '../live'
 import { play, setSoundEnabled, soundEnabled, unlockAudio } from '../sound'
-import { ORGS, type Training } from '../types'
+import { ORGS, type AccessTraining, type Training } from '../types'
 import { Caption, FullscreenIcon, SettingsIcon, VolumeIcon, Wordmark } from '../ui'
 import { CommStrip, EventsCard, RegistryCard } from './CommStrip'
 import { Comparison } from './Comparison'
@@ -17,7 +18,7 @@ import { RolePanel } from './RolePanels'
 export function Host() {
   const { sessionId = '' } = useParams()
   const navigate = useNavigate()
-  const { data: view, status, error, refresh } = useLive<Training>(sessionId, { kind: 'training' })
+  const { data: view, status, error, refresh } = useLive<Training | AccessTraining>(sessionId, { kind: 'training' })
   const [review, setReview] = useState<number | null>(null)
   const [pausedForReview, setPausedForReview] = useState(false)
   const [drawer, setDrawer] = useState(false)
@@ -51,7 +52,7 @@ export function Host() {
   }, [refresh, sessionId, view?.language])
 
   const hostStep = useCallback((value: 'continue' | 'skip') => {
-    if (!view?.round) return
+    if (!view || view.gameId === 'access' || !view.round) return
     void post('actions', {
       roundId: view.round.id,
       stepId: view.round.stepId,
@@ -59,20 +60,24 @@ export function Host() {
       actionId: crypto.randomUUID(),
       value,
     })
-  }, [post, view?.round])
+  }, [post, view])
 
-  const history = view?.round?.history ?? []
-  const reviewIndex = review == null ? -1 : history.findIndex((event) => event.sequence === review)
+  const isAccess = view?.gameId === 'access'
+  const accessView = isAccess ? view as AccessTraining : null
+  const accessHistory = accessView?.access?.history ?? []
+  const logisticsHistory = !isAccess && view && view.round ? view.round.history : []
+  const history = isAccess ? accessHistory : logisticsHistory
+  const reviewIndex = review == null ? -1 : history.findIndex((event: { sequence: number }) => event.sequence === review)
 
   const openReview = useCallback(() => {
-    if (!view?.round || history.length === 0) return
+    if (history.length === 0) return
     setReview(history.at(-1)!.sequence)
     setDrawer(false)
-    if (!view.paused) {
+    if (view && !view.paused) {
       setPausedForReview(true)
       void post('pause')
     }
-  }, [history, post, view?.paused, view?.round])
+  }, [history, post, view])
 
   const closeReview = useCallback(() => {
     setReview(null)
@@ -96,7 +101,7 @@ export function Host() {
         else setDrawer((open) => !open)
       } else if (event.key === ' ') {
         event.preventDefault()
-        if (view?.round) void post(view.paused ? 'resume' : 'pause')
+        if (view && (view.round || accessView?.access)) void post(view.paused ? 'resume' : 'pause')
       } else if (event.key === 'ArrowLeft') {
         if (review == null) openReview()
         else stepReview(-1)
@@ -112,15 +117,16 @@ export function Host() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [closeReview, history.length, openReview, post, review, reviewIndex, stepReview, view?.paused, view?.round])
+  }, [accessView?.access, closeReview, history.length, openReview, post, review, reviewIndex, stepReview, view])
 
   useEffect(() => {
-    const latest = history.at(-1)
+    if (isAccess) return
+    const latest = logisticsHistory.at(-1)
     if (!latest) return
     const previous = lastSequence.current
     lastSequence.current = latest.sequence
     if (previous == null || latest.sequence <= previous) return
-    const fresh = history.filter((event) => event.sequence > previous)
+    const fresh = logisticsHistory.filter((event) => event.sequence > previous)
     const types = new Set(fresh.map((event) => event.displayType))
     const wrong = fresh.some((event) => event.displayType === 'feedback' && event.result === 'wrong')
     if (view?.round?.logistics.phase === 'delivered' && fresh.some((event) => event.stepId === 'S18' || event.stepId === 'S19' || event.stepId === 'S20')) play('delivered')
@@ -130,7 +136,7 @@ export function Host() {
     else if (types.has('fetch')) play('fetch')
     else if (types.has('engine')) play('engine')
     else if (types.has('choice')) play('tick')
-  }, [history, view?.round?.logistics.phase])
+  }, [isAccess, logisticsHistory, view?.round?.logistics.phase])
 
   if (!view) {
     return (
@@ -145,16 +151,21 @@ export function Host() {
   const pack = hostPackFor(view.gameId)
   const round = view.round
   const reviewing = review != null && reviewIndex >= 0
-  const frame = reviewing ? history[reviewIndex].frame : round?.frame
+  const frame = !isAccess && reviewing && round ? logisticsHistory[reviewIndex]?.frame : round?.frame
   const panel = (org: string) => frame?.panels.find((p) => p.organizationId === org)
   const isActive = (org: string) => !reviewing && round?.activeOrg === org
   const isAsk = (org: string) => !reviewing && round?.askOrg === org
-  const startLabel = view.startMode === 'only_bdi' ? t.startOnlyBdi : view.rounds.length === 0 ? t.startWithout : t.startWith
+  const startLabel = view.startMode === 'story'
+    ? t.newGame
+    : view.startMode === 'only_bdi'
+      ? t.startOnlyBdi
+      : view.rounds.length === 0 ? t.startWithout : t.startWith
   const nextRound = round && round.stepId === 'S20' && round.mode === 'without_bdi' && !view.comparison
     ? () => void post('start')
     : null
   const MapView = pack.MapView
   const Explainer = pack.Explainer
+  const accessActive = Boolean(accessView?.access)
 
   const toggleFullscreen = () => {
     if (document.fullscreenElement) void document.exitFullscreen()
@@ -162,7 +173,6 @@ export function Host() {
   }
 
   const goHome = () => {
-    // Test table embeds host + phones in iframes; leaving only the iframe keeps the old phones.
     if (window.top && window.top !== window) {
       window.top.location.hash = '#/'
       return
@@ -195,14 +205,16 @@ export function Host() {
 
   return (
     <main
-      className={`stage${round && !showDossiers ? ' dossiers-off' : ''}`}
+      className={`stage${round && !showDossiers ? ' dossiers-off' : ''}${isAccess ? ' access-stage' : ''}`}
       data-testid="training-root"
       onPointerDown={() => unlockAudio()}
     >
       <header className="hud-top">
         <Wordmark light />
         {view.sessionName && view.sessionName !== 'BDI Game' && <strong className="hud-name">{view.sessionName}</strong>}
-        {round ? (
+        {accessActive ? (
+          <span className="hud-pill round-bdi">{view.gameTitle}</span>
+        ) : round ? (
           <>
             <span className={`hud-pill${round.mode === 'with_bdi' ? ' round-bdi' : ''}`}>{t.round} {round.number} · {round.mode === 'with_bdi' ? t.withBdi : t.withoutBdi}</span>
             <span className="hud-pill" data-testid="sim-time">{round.simLabel}</span>
@@ -210,7 +222,7 @@ export function Host() {
         ) : (
           <span className="hud-pill">{t.lobby}</span>
         )}
-        {view.paused && round && (
+        {view.paused && (round || accessActive) && (
           <button type="button" className="hud-pill paused" data-testid="hud-resume" onClick={() => void post('resume')}>{t.resume}</button>
         )}
         <span className="hud-spacer" />
@@ -256,9 +268,9 @@ export function Host() {
       </header>
       {actionError && <p className="hud-error" role="alert">{actionError}</p>}
 
-      {!round && (
+      {!round && !accessActive && (
         <Lobby
-          view={view}
+          view={view as Training}
           phoneUrl={phoneUrl}
           startLabel={startLabel}
           onRelease={(org) => void post('release', { organizationId: org })}
@@ -266,7 +278,18 @@ export function Host() {
         />
       )}
 
-      {round && frame && (
+      {accessView?.access && (
+        <AccessHost
+          view={accessView}
+          reviewing={reviewing}
+          reviewIndex={reviewIndex}
+          history={accessHistory}
+          onStepReview={stepReview}
+          onCloseReview={closeReview}
+        />
+      )}
+
+      {round && frame && !isAccess && (
         <>
           <div className="side side-left">
             <RolePanel panel={panel('carrier')} active={isActive('carrier')} ask={isAsk('carrier')} reveal={dossiersOpen} />
@@ -286,7 +309,7 @@ export function Host() {
             {reviewing && (
               <div className="review-banner" data-testid="review-banner">
                 <strong>{t.reviewBanner}</strong>
-                <span>{reviewIndex + 1} / {history.length} · {history[reviewIndex].text}</span>
+                <span>{reviewIndex + 1} / {history.length} · {logisticsHistory[reviewIndex].text}</span>
                 <button type="button" className="btn" onClick={() => stepReview(-1)} aria-label="←">←</button>
                 <button type="button" className="btn" onClick={() => stepReview(1)} aria-label="→">→</button>
                 <button type="button" className="btn primary" onClick={closeReview}>{t.backToLive}</button>
@@ -308,7 +331,7 @@ export function Host() {
                 lang={view.language}
                 onNextRound={nextRound}
                 nextRoundLabel={t.startWith}
-                review={reviewing ? { org: ORGS.find((org) => org === history[reviewIndex].actorRole) ?? null, stepId: history[reviewIndex].stepId } : undefined}
+                review={reviewing ? { org: ORGS.find((org) => org === logisticsHistory[reviewIndex].actorRole) ?? null, stepId: logisticsHistory[reviewIndex].stepId } : undefined}
               />
             )}
             {!reviewing && round.stepId !== 'S00' && round.stepId !== 'S20' && round.caption && <div className="map-caption"><Caption>{round.caption}</Caption></div>}
@@ -321,11 +344,11 @@ export function Host() {
         </>
       )}
 
-      {view.comparison && !hideComparison && <Comparison view={view} onClose={() => setHideComparison(true)} />}
+      {view.comparison && !hideComparison && !isAccess && <Comparison view={view as Training} onClose={() => setHideComparison(true)} />}
 
       {drawer && (
         <ManageDrawer
-          view={view}
+          view={view as Training}
           live={status}
           sound={sound}
           onSound={(on) => { unlockAudio(); setSoundEnabled(on); setSound(on) }}

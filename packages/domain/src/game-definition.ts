@@ -18,6 +18,7 @@ export interface GameCatalogEntry {
 }
 
 export interface GameDefinition extends GameCatalogEntry {
+  kind: 'rounds' | 'story'
   orgs: OrgDefinition[]
   steps: string[]
   policyRules: PolicyRule[]

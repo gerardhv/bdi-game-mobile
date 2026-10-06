@@ -8,6 +8,7 @@ export const LOGISTICS_GAME_ID = 'logistics'
 export const logisticsGame: GameDefinition = {
   id: LOGISTICS_GAME_ID,
   version: 1,
+  kind: 'rounds',
   titles: {
     nl: 'Logistieke keten',
     en: 'Logistics chain',

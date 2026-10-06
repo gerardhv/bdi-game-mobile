@@ -15,7 +15,7 @@ type GameCard = {
   version: number
   titles: { nl: string; en: string }
   blurbs: { nl: string; en: string }
-  startModes: ('without_bdi' | 'only_bdi')[]
+  startModes: ('without_bdi' | 'only_bdi' | 'story')[]
 }
 
 export function Home() {
@@ -40,7 +40,7 @@ export function Home() {
       .catch(() => setError(t.offline))
   }, [t.offline])
 
-  async function create(startMode: 'without_bdi' | 'only_bdi') {
+  async function create(startMode: 'without_bdi' | 'only_bdi' | 'story') {
     if (!gameId) return
     setBusy(true)
     try {
@@ -96,12 +96,16 @@ export function Home() {
         )}
         {selected && (
           <>
-            <div className="home-roles" aria-hidden="true">{ORGS.map((org) => <RoleIcon key={org} org={org} />)}</div>
+            <div className="home-roles" aria-hidden="true">
+              {(selected.id === 'access' ? ['admin', 'owner', 'provider', 'consumer'] : ORGS).map((org) => (
+                <RoleIcon key={org} org={org} />
+              ))}
+            </div>
             <p className="home-sub"><strong>{selected.titles[lang]}</strong> — {selected.blurbs[lang]}</p>
             {(games?.length ?? 0) > 1 && (
               <button type="button" className="btn ghost" onClick={() => setGameId(null)}>{t.backToGames}</button>
             )}
-            <button type="button" className="btn go" data-testid="start-session" disabled={busy} onClick={() => void create('without_bdi')}>{t.newGame}</button>
+            <button type="button" className="btn go" data-testid="start-session" disabled={busy} onClick={() => void create(selected.startModes.includes('story') ? 'story' : 'without_bdi')}>{t.newGame}</button>
             {selected.startModes.includes('only_bdi') && (
               <button type="button" className="btn" disabled={busy} onClick={() => void create('only_bdi')}>{t.onlyBdi}</button>
             )}
@@ -154,6 +158,9 @@ export function Settings() {
   )
 }
 
+// Survives React Strict Mode remounts so the table creates one session, not two.
+let tableCreateInFlight: Promise<string> | null = null
+
 export function TestTable() {
   const navigate = useNavigate()
   const { sessionId = '' } = useParams()
@@ -161,38 +168,61 @@ export function TestTable() {
   const gameId = params.get('game') ?? 'logistics'
   const [view, setView] = useState<Training | null>(null)
   const [phones, setPhones] = useState<{ label: string; src: string }[] | null>(null)
-  const creating = useRef(false)
+  const [error, setError] = useState('')
+  const phoneSession = useRef<string | null>(null)
   const t = tr(storedLang())
   useEffect(() => {
-    if (sessionId || creating.current) return
-    creating.current = true
-    void api<Training>('/api/sessions', {
+    if (sessionId) {
+      tableCreateInFlight = null
+      return
+    }
+    setError('')
+    const startMode = gameId === 'access' ? 'story' : 'without_bdi'
+    tableCreateInFlight ??= api<Training>('/api/sessions', {
       method: 'POST',
-      body: JSON.stringify({ name: t.allRoles, language: storedLang(), startMode: 'without_bdi', gameId }),
+      body: JSON.stringify({ name: t.allRoles, language: storedLang(), startMode, gameId }),
+    }).then((created) => created.sessionId)
+    void tableCreateInFlight.then((id) => {
+      navigate(`/table/${id}?slot=host&game=${encodeURIComponent(gameId)}`, { replace: true })
+    }).catch((err) => {
+      tableCreateInFlight = null
+      setError(err instanceof Error ? err.message : t.offline)
     })
-      .then((created) => navigate(`/table/${created.sessionId}?slot=host`, { replace: true }))
-  }, [navigate, sessionId, t.allRoles, gameId])
+  }, [navigate, sessionId, t.allRoles, t.offline, gameId])
   useEffect(() => {
-    if (!sessionId || view) return
+    if (!sessionId) return
+    setView(null)
+    phoneSession.current = null
+    setPhones(null)
     void api<Training>(`/api/sessions/${sessionId}/training`).then(setView)
-  }, [sessionId, view])
+    const timer = setInterval(() => {
+      void api<Training>(`/api/sessions/${sessionId}/training`).then(setView).catch(() => undefined)
+    }, 2000)
+    return () => clearInterval(timer)
+  }, [sessionId])
   useEffect(() => {
-    if (!view || phones) return
+    if (!view || phoneSession.current === view.sessionId) return
+    phoneSession.current = view.sessionId
     const origin = window.location.href.split('#')[0]
     setPhones(view.roles.map((role) => ({
-      label: role.roleLabel,
-      src: role.claimed
-        ? `${origin}#/play/${view.sessionId}?slot=${role.organizationId}`
-        : `${origin}#/join?code=${view.code}&role=${role.organizationId}&invite=${role.inviteToken ?? ''}&slot=${role.organizationId}`,
+      label: role.organizationId,
+      src: `${origin}#/join?code=${encodeURIComponent(view.code)}&role=${encodeURIComponent(role.organizationId)}&invite=${encodeURIComponent(role.inviteToken ?? '')}&slot=${encodeURIComponent(role.organizationId)}&game=${encodeURIComponent(view.gameId)}`,
     })))
-  }, [phones, view])
-  if (!view) return <p className="table-wait">{t.testTablePrep}</p>
-  const origin = window.location.href.split('#')[0]
+  }, [view])
+  if (error) {
+    return (
+      <main className="table-wait">
+        <p className="error-bar" role="alert">{error}</p>
+        <Link className="btn" to="/">{t.back}</Link>
+      </main>
+    )
+  }
+  if (!view || !phones) return <p className="table-wait">{t.testTablePrep}</p>
   return (
     <main className="test-table">
       <div className="test-grid">
-        <iframe title="Beamer" src={`${origin}#/host/${view.sessionId}?slot=host`} />
-        {phones?.map((phone) => <iframe key={phone.label} title={phone.label} src={phone.src} />)}
+        <iframe title="Beamer" src={`${window.location.href.split('#')[0]}#/host/${view.sessionId}?slot=host`} />
+        {phones.map((phone) => <iframe key={`${view.sessionId}-${phone.label}`} title={phone.label} src={phone.src} />)}
       </div>
     </main>
   )

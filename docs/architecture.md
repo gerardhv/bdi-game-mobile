@@ -11,7 +11,7 @@ De HTTP-server staat in `services/game-api`. Elke spelhandeling is één aanroep
 
 ## Engine en game packs
 
-`SessionState.gameId` wijst naar een pack in `catalog.ts` (nu alleen `logistics`). De entree haalt `GET /api/games` op; `POST /api/sessions` stuurt `gameId` mee. Domain-inhoud per pack leeft onder `packages/domain/src/games/<id>/`. Host-visuals per pack onder `apps/web/src/games/<id>/`, gekozen via `hostPackFor(gameId)`.
+`SessionState.gameId` wijst naar een pack in `catalog.ts` (`logistics` of `access`). De entree haalt `GET /api/games` op; `POST /api/sessions` stuurt `gameId` mee. Domain-inhoud per pack leeft onder `packages/domain/src/games/<id>/`. Host-visuals per pack onder `apps/web/src/games/<id>/`, gekozen via `hostPackFor(gameId)`. Pack `access` gebruikt een eigen story-reducer (`session.access`) in plaats van logistieke rondes; tick, idle-cleanup en Postgres-flush blijven engine-breed.
 
 Idle-cleanup, IP-sessielimiet en debounced Postgres-flush horen bij de engine/API, niet bij een pack. Zie ook [games/README.md](games/README.md).
 

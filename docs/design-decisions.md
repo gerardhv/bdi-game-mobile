@@ -13,3 +13,5 @@ De file staat op dag 2, 04:30, vóór 05:00, 06:00 en 08:00. Hoeveelheid is 1. D
 `SUBSCRIPTIONS` bestaat alleen met BDI. Vergelijking ontstaat alleen als ronde 1 en ronde 2 allebei zijn gespeeld.
 
 De ideeënlijst na de specificatie is niet gebouwd.
+
+Pack `access` (*Wie mag deze gegevens zien?*) heeft een eigen reducer en `session.access`-document in plaats van de logistieke stappen S00–S20 en de zonder/met-BDI-rondes. Die game past niet in de meerkeuze-en-outbox-flow; sessie, QR-rollen, pauze, tick en persist blijven gedeeld.

@@ -64,6 +64,7 @@ describe('session isolation', () => {
     const { app } = createApp(new MemoryStore())
     const catalog = await (await app.request('/api/games')).json() as { games: { id: string }[] }
     expect(catalog.games.some((game) => game.id === 'logistics')).toBe(true)
+    expect(catalog.games.some((game) => game.id === 'access')).toBe(true)
     const host = await client(app)
     const created = await app.request('/api/sessions', {
       method: 'POST',
@@ -74,5 +75,43 @@ describe('session isolation', () => {
     const body = await created.json() as { gameId: string; gameTitle: string }
     expect(body.gameId).toBe('logistics')
     expect(body.gameTitle).toBeTruthy()
+  })
+
+  it('creates an access session and rejects spoofed policy from a non-owner', async () => {
+    const { app } = createApp(new MemoryStore())
+    const host = await client(app)
+    const created = await (await app.request('/api/sessions', {
+      method: 'POST',
+      headers: host.headers,
+      body: JSON.stringify({ name: 'Access', gameId: 'access', startMode: 'story' }),
+    })).json() as { sessionId: string; roles: { organizationId: string; inviteToken: string }[]; gameId: string }
+    expect(created.gameId).toBe('access')
+    const players: Record<string, Awaited<ReturnType<typeof client>>> = {}
+    for (const role of created.roles) {
+      players[role.organizationId] = await client(app)
+      await app.request(`/api/sessions/${created.sessionId}/claim`, {
+        method: 'POST',
+        headers: players[role.organizationId].headers,
+        body: JSON.stringify({ organizationId: role.organizationId, inviteToken: role.inviteToken }),
+      })
+      await app.request(`/api/sessions/${created.sessionId}/ready`, { method: 'POST', headers: players[role.organizationId].headers })
+    }
+    await app.request(`/api/sessions/${created.sessionId}/start`, { method: 'POST', headers: host.headers })
+    const spoof = await app.request(`/api/sessions/${created.sessionId}/access`, {
+      method: 'POST',
+      headers: players.consumer.headers,
+      body: JSON.stringify({
+        type: 'setPolicy', expectedVersion: 1, actionId: crypto.randomUUID(),
+        shareLoading: true, shareFinance: true,
+      }),
+    })
+    expect(spoof.status).toBeGreaterThanOrEqual(400)
+
+    const other = await (await app.request('/api/sessions', {
+      method: 'POST',
+      headers: host.headers,
+      body: JSON.stringify({ name: 'Access 2', gameId: 'access', startMode: 'story' }),
+    })).json() as { sessionId: string }
+    expect(other.sessionId).not.toBe(created.sessionId)
   })
 })

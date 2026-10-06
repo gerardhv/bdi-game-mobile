@@ -193,6 +193,10 @@ export class GameService {
     const now = new Date()
     const maxOpen = Math.max(1, Number(process.env.MAX_OPEN_SESSIONS_PER_IP) || 10)
     const game = getGame(input.gameId)
+    const startMode = input.startMode ?? game.defaultStartMode
+    if (!game.startModes.includes(startMode)) {
+      throw new GameError('bad_start', `Startmodus ${startMode} past niet bij dit spel.`, 400)
+    }
     const invites = Object.fromEntries(orgIds(game).map((org) => [org, randomUUID()]))
     const state = createSession({
       id: randomUUID(),
@@ -200,7 +204,7 @@ export class GameService {
       hostUserId: userId,
       name: input.name?.slice(0, 40) || game.titles.nl,
       language: input.language ?? 'nl',
-      startMode: input.startMode ?? game.defaultStartMode,
+      startMode,
       now: now.toISOString(),
       expiresAt: new Date(now.getTime() + Number(process.env.SESSION_TTL_HOURS ?? 24) * 3600_000).toISOString(),
       invites,
