@@ -1,26 +1,29 @@
 import { useEffect, useState, type CSSProperties } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { api, apiUrl, withSlot } from '../api'
-import { RoleIcon, type Org } from '../art/icons'
+import { api, apiUrl, identitySlot } from '../api'
+import { RoleIcon } from '../art/icons'
 import { storedLang, tr } from '../i18n'
 
 type Preview = {
   sessionId: string
   name: string
   language: 'nl' | 'en'
-  free: { organizationId: Org; roleLabel: string; name: string; blurb: string }[]
-  roles: { organizationId: Org; roleLabel: string; name: string; blurb: string; free: boolean }[]
+  gameId: string
+  gameTitle: string
+  free: { organizationId: string; roleLabel: string; name: string; blurb: string }[]
+  roles: { organizationId: string; roleLabel: string; name: string; blurb: string; free: boolean }[]
 }
 
 export function Join() {
   const [params] = useSearchParams()
   const navigate = useNavigate()
   const code = params.get('code') ?? ''
-  const requested = (params.get('role') ?? '') as Org | ''
+  const requested = (params.get('role') ?? '') as string
   const invite = params.get('invite') ?? ''
+  const gameHint = params.get('game') ?? ''
   const [name, setName] = useState('')
   const [preview, setPreview] = useState<Preview | null>(null)
-  const [role, setRole] = useState<Org | ''>(requested)
+  const [role, setRole] = useState(requested)
   const [invited, setInvited] = useState(Boolean(invite))
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -43,8 +46,18 @@ export function Join() {
   const taken = Boolean(requestedCard && !requestedCard.free)
   const card = taken ? undefined : requestedCard
 
+  function goPlay(sessionId: string, gameId: string) {
+    // The slot selects the stored token; switching slots after the claim would seat a different user.
+    const slot = identitySlot()
+    const game = gameId || gameHint
+    const search = new URLSearchParams()
+    if (slot) search.set('slot', slot)
+    if (game) search.set('game', game)
+    navigate(`/play/${sessionId}?${search.toString()}`)
+  }
+
   async function claim() {
-    if (!preview || !role) return
+    if (!preview || !role || busy) return
     setBusy(true)
     setError('')
     try {
@@ -52,14 +65,14 @@ export function Join() {
         method: 'POST',
         body: JSON.stringify({ organizationId: role, inviteToken: invited ? invite : null, displayName: name }),
       })
-      navigate(withSlot(`/play/${preview.sessionId}`))
+      goPlay(preview.sessionId, preview.gameId)
     } catch (err) {
       const e = err as Error & { body?: { error?: string } }
       if (e.body?.error === 'already_seated') {
-        navigate(withSlot(`/play/${preview.sessionId}`))
+        goPlay(preview.sessionId, preview.gameId)
         return
       }
-      setError(t.roleTaken)
+      setError(e.message || t.roleTaken)
       setRole('')
       setInvited(false)
       await load().catch(() => undefined)
@@ -71,7 +84,7 @@ export function Join() {
   return (
     <main className="join-screen">
       <section className="join-card" style={card ? ({ '--role': `var(--${card.organizationId})` } as CSSProperties) : undefined}>
-        <small className="org">{t.session} · {preview?.name ?? code}</small>
+        <small className="org">{t.session} · {preview?.name ?? code}{preview?.gameTitle ? ` · ${preview.gameTitle}` : ''}</small>
         {card ? (
           <>
             <RoleIcon org={card.organizationId} className="big-icon" />
@@ -86,7 +99,7 @@ export function Join() {
               <input value={name} maxLength={40} onChange={(e) => setName(e.target.value)} />
             </label>
             <button type="button" className="btn go" data-testid="claim-role" disabled={busy} onClick={() => void claim()}>
-              {t.takeRole}
+              {busy ? t.reconnecting : t.takeRole}
             </button>
             {!requested && <button type="button" className="btn ghost" onClick={() => setRole('')}>{t.back}</button>}
           </>

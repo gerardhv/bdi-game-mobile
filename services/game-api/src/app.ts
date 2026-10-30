@@ -2,7 +2,7 @@ import { networkInterfaces } from 'node:os'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { streamSSE } from 'hono/streaming'
-import { GameError, type OrgId } from '@bdi/domain'
+import { GameError, type AccessCardId, type AccessDossierItem, type AccessLookup, type AccessOutcome, type OrgId } from '@bdi/domain'
 import { GameService, userFromAuth, type Store } from './service.js'
 
 export function createApp(store: Store) {
@@ -38,6 +38,7 @@ export function createApp(store: Store) {
     return c.json({ addresses })
   })
   app.post('/api/dev/anonymous', async (c) => c.json(await game.anonymous()))
+  app.get('/api/games', (c) => c.json({ games: game.listGames() }))
   app.post('/api/sessions', async (c) => c.json(await game.create(await user(c), await c.req.json(), clientIp(c))))
   app.get('/api/join', async (c) => c.json(await game.joinPreview(c.req.query('code') ?? '')))
   app.get('/api/sessions/:id/training', async (c) => c.json(await game.training(c.req.param('id'), await user(c))))
@@ -102,6 +103,48 @@ export function createApp(store: Store) {
       type: 'submitAction', userId: await user(c), roundId: body.roundId, stepId: body.stepId,
       expectedStateVersion: body.expectedStateVersion, actionId: body.actionId, value: body.value,
     }))
+  })
+  app.post('/api/sessions/:id/access', async (c) => {
+    const body = await c.req.json() as Record<string, unknown>
+    const userId = await user(c)
+    const expectedVersion = Number(body.expectedVersion)
+    const actionId = String(body.actionId ?? '')
+    const kind = String(body.type ?? '')
+    const base = { userId, expectedVersion, actionId }
+    let command: import('@bdi/domain').Command
+    switch (kind) {
+      case 'submitDossier':
+        command = {
+          type: 'accessSubmitDossier',
+          ...base,
+          items: Array.isArray(body.items) ? body.items.map((item) => String(item) as AccessDossierItem) : [],
+        }
+        break
+      case 'reviewDossier':
+        command = { type: 'accessReviewDossier', ...base, decision: body.decision === 'return' ? 'return' : 'admit' }
+        break
+      case 'answer':
+        command = { type: 'accessAnswer', ...base, optionId: String(body.optionId ?? '') }
+        break
+      case 'setPolicy':
+        command = { type: 'accessSetPolicy', ...base, shareLoading: Boolean(body.shareLoading), shareFinance: Boolean(body.shareFinance) }
+        break
+      case 'sendRequest':
+        command = { type: 'accessSendRequest', ...base, cardId: String(body.cardId ?? '') as AccessCardId }
+        break
+      case 'lookup':
+        command = { type: 'accessLookup', ...base, source: String(body.source ?? '') as AccessLookup }
+        break
+      case 'decide':
+        command = { type: 'accessDecide', ...base, decision: body.decision === 'deliver' ? 'deliver' : 'refuse' }
+        break
+      case 'predict':
+        command = { type: 'accessPredict', userId, actionId, requestId: String(body.requestId ?? ''), outcome: String(body.outcome ?? '') as AccessOutcome }
+        break
+      default:
+        return c.json({ error: 'unknown', message: 'Onbekende access-actie.' }, 400)
+    }
+    return c.json(await game.command(c.req.param('id'), userId, command))
   })
   app.post('/api/sessions/:id/pause', async (c) => c.json(await game.command(c.req.param('id'), await user(c), { type: 'pause', userId: await user(c) })))
   app.post('/api/sessions/:id/resume', async (c) => c.json(await game.command(c.req.param('id'), await user(c), { type: 'resume', userId: await user(c) })))

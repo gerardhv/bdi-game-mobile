@@ -1,12 +1,19 @@
 import type { ReactNode } from 'react'
 
 export type Org = 'buyer' | 'seller' | 'carrier' | 'delivery'
+export type AccessOrg = 'admin' | 'owner' | 'registry' | 'provider' | 'consumer'
+export type AnyOrg = Org | AccessOrg
 
-export const ORG_COLOR: Record<Org, string> = {
+export const ORG_COLOR: Record<AnyOrg, string> = {
   buyer: '#1f6f8b',
   seller: '#c46b2c',
   carrier: '#2e7d4f',
   delivery: '#6b4c9a',
+  admin: '#1f6f8b',
+  owner: '#c46b2c',
+  registry: '#3d5a80',
+  provider: '#6b4c9a',
+  consumer: '#2e7d4f',
 }
 
 function Art({ children, label, className }: { children: ReactNode; label?: string; className?: string }) {
@@ -72,13 +79,63 @@ export function VanArt() {
   )
 }
 
-export function RoleIcon({ org, className, label }: { org: Org; className?: string; label?: string }) {
+export function ClipboardArt() {
+  return (
+    <>
+      <Shadow />
+      <rect x="14" y="10" width="36" height="46" rx="5" fill="#f4efe4" />
+      <rect x="14" y="10" width="36" height="10" rx="5" fill="#1f6f8b" />
+      <rect x="24" y="6" width="16" height="10" rx="3" fill="#c9905a" />
+      <rect x="22" y="28" width="20" height="3" rx="1.5" fill="#1f6f8b" opacity="0.7" />
+      <rect x="22" y="36" width="16" height="3" rx="1.5" fill="#1f6f8b" opacity="0.45" />
+      <rect x="22" y="44" width="18" height="3" rx="1.5" fill="#1f6f8b" opacity="0.45" />
+      <circle cx="46" cy="48" r="10" fill="#2fa35a" />
+      <path d="M41 48l3 3 7-8" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+    </>
+  )
+}
+
+export function ConnectorArt() {
+  return (
+    <>
+      <Shadow />
+      <rect x="8" y="22" width="20" height="20" rx="4" fill="#6b4c9a" />
+      <rect x="36" y="22" width="20" height="20" rx="4" fill="#6b4c9a" />
+      <rect x="26" y="29" width="12" height="6" rx="2" fill="#f2c230" />
+      <circle cx="18" cy="32" r="4" fill="#f4efe4" />
+      <circle cx="46" cy="32" r="4" fill="#f4efe4" />
+      <path d="M18 14v8M46 14v8M18 42v8M46 42v8" stroke="#2b3040" strokeWidth="3" strokeLinecap="round" />
+    </>
+  )
+}
+
+export function RegistryArt() {
+  return (
+    <>
+      <Shadow />
+      <rect x="12" y="10" width="40" height="46" rx="6" fill="#3d5a80" />
+      <rect x="18" y="18" width="28" height="4" rx="2" fill="#f4efe4" opacity="0.9" />
+      <rect x="18" y="28" width="22" height="3" rx="1.5" fill="#9eb6d4" />
+      <rect x="18" y="36" width="26" height="3" rx="1.5" fill="#9eb6d4" />
+      <rect x="18" y="44" width="18" height="3" rx="1.5" fill="#9eb6d4" />
+      <circle cx="44" cy="46" r="8" fill="#f2c230" />
+      <path d="M41 46h6M44 43v6" stroke="#1b2a4a" strokeWidth="2" strokeLinecap="round" />
+    </>
+  )
+}
+
+export function RoleIcon({ org, className, label }: { org: string; className?: string; label?: string }) {
   return (
     <Art className={className} label={label}>
       {org === 'buyer' && <BoxArt arrow="down" />}
       {org === 'seller' && <BoxArt arrow="up" />}
       {org === 'carrier' && <TruckArt />}
       {org === 'delivery' && <VanArt />}
+      {org === 'admin' && <ClipboardArt />}
+      {org === 'owner' && <BoxArt arrow="up" />}
+      {org === 'registry' && <RegistryArt />}
+      {org === 'provider' && <ConnectorArt />}
+      {org === 'consumer' && <TruckArt />}
     </Art>
   )
 }

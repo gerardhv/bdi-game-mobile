@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   blankRound, createSession, dispatch, GameError, playerView, readSource, revisedEtas, trainingView,
-  type Ctx, type OrgId, type SessionState,
+  type Ctx, type OrgId, type PlayerView, type SessionState,
 } from './index.js'
 
 const orgs: OrgId[] = ['buyer', 'seller', 'carrier', 'delivery']
@@ -54,7 +54,7 @@ describe('round rules', () => {
       expectedStateVersion: round.stateVersion, actionId: 'skip', value: 'camera',
     }, ctx())).toThrow(GameError)
     state = act(state, 'buyer', 'camera')
-    const seller = playerView(state, 'seller', ctx().now)!
+    const seller = playerView(state, 'seller', ctx().now)! as PlayerView
     expect(JSON.stringify(seller.round?.dossier)).not.toContain('camera')
     expect(seller.round?.task?.highlightOptionId).toBeNull()
     expect(JSON.stringify(seller)).not.toContain('SEED-DO-NOT-LEAK')
@@ -116,7 +116,7 @@ describe('round rules', () => {
     expect(delivery.items.some((item) => item.value.includes('06:30'))).toBe(true)
     expect(seller.items.some((item) => item.value.includes('06:00') || item.label.includes('v2'))).toBe(true)
     expect(frame.comm.toLowerCase()).toContain('afstemming nodig')
-    expect(playerView(state, 'seller', ctx().now)!.round!.dossier.some((item) => item.value.includes('06:30'))).toBe(false)
+    expect((playerView(state, 'seller', ctx().now)! as PlayerView).round!.dossier.some((item) => item.value.includes('06:30'))).toBe(false)
     state = dispatch(state, { type: 'tick' }, ctx(later(now, 3000))).state
     now = later(now, 3000)
     const finish = (user: string, value: string) => {
@@ -154,7 +154,7 @@ describe('round rules', () => {
     now = later(now, 4000)
     state = dispatch(state, { type: 'tick' }, ctx(now)).state
     expect(state.rounds[0].stepId).toBe('S02')
-    expect(playerView(state, 'seller', now)!.round!.dossier.some((item) => item.value.includes('Camera'))).toBe(false)
+    expect((playerView(state, 'seller', now)! as PlayerView).round!.dossier.some((item) => item.value.includes('Camera'))).toBe(false)
     for (const org of orgs) {
       state = dispatch(state, {
         type: 'submitAction', userId: org, roundId: 'round-1', stepId: 'S02',
@@ -163,8 +163,8 @@ describe('round rules', () => {
     }
     now = later(now, 4000)
     state = dispatch(state, { type: 'tick' }, ctx(now)).state
-    expect(playerView(state, 'seller', now)!.round!.dossier.some((item) => item.value.toLowerCase().includes('camera'))).toBe(true)
-    expect(playerView(state, 'carrier', now)!.round!.dossier.some((item) => item.value.toLowerCase().includes('camera'))).toBe(false)
+    expect((playerView(state, 'seller', now)! as PlayerView).round!.dossier.some((item) => item.value.toLowerCase().includes('camera'))).toBe(true)
+    expect((playerView(state, 'carrier', now)! as PlayerView).round!.dossier.some((item) => item.value.toLowerCase().includes('camera'))).toBe(false)
   })
 
   it('keeps pause time out of the active decision time', () => {

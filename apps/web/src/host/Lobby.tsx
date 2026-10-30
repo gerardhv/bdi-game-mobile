@@ -21,7 +21,7 @@ export function Lobby({
         <span className="code" aria-label={t.sessionCode} data-testid="session-code">{view.code}</span>
         <p>{lan ? t.lobbyHintLocal(phoneUrl || t.lobbyWifi) : t.lobbyHintOnline}</p>
       </div>
-      <div className="qr-grid">
+      <div className="qr-grid" style={{ '--qr-cols': view.roles.length } as CSSProperties}>
         {view.roles.map((role) => (
           <article
             key={role.organizationId}

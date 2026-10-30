@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react'
-import { RoleIcon, type Org } from '../art/icons'
+import { RoleIcon } from '../art/icons'
 import { FactRow } from '../ui'
 import type { Panel } from '../types'
 
@@ -12,7 +12,7 @@ export function RolePanel({
   reveal?: boolean
 }) {
   if (!panel) return null
-  const org: Org = panel.organizationId
+  const org = panel.organizationId
   return (
     <article
       className={`role-panel${active || ask ? ' is-active' : ''}${reveal ? '' : ' is-sealed'}`}

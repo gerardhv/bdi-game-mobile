@@ -1,6 +1,6 @@
 import { etaLabel, orgName, revisedEtas, roleLabel, scenario, type EtaDef } from './scenario.js'
-import { shuffle } from './shuffle.js'
-import type { GameState, Language, OrgId, QuestionOption, RoundState, StepId } from './types.js'
+import { shuffle } from '../../shuffle.js'
+import type { GameState, Language, OrgId, QuestionOption, RoundState, StepId } from '../../types.js'
 
 export type Actor = OrgId | 'host' | 'engine' | 'all'
 

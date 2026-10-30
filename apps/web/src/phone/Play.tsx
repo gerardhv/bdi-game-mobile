@@ -1,19 +1,66 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useSearchParams } from 'react-router-dom'
 import { api } from '../api'
 import {
   BellIcon, BellOutline, CheckBadge, CrossBadge, DataIcon, EnvelopeIcon, FolderIcon, InfoIcon, RoleIcon, TaskIcon,
 } from '../art/icons'
+import { AccessPlay } from '../games/access/Play'
 import { ROLE_NAMES, tr, useDocumentLang } from '../i18n'
 import { useLive } from '../live'
-import type { Player } from '../types'
+import type { AccessPlayer, Player } from '../types'
 import { FactRow, Tile, type TileState } from '../ui'
 
 type Tab = 'task' | 'info' | 'notices'
 
 export function Play() {
   const { sessionId = '' } = useParams()
-  const { data: view, status, error, refresh } = useLive<Player>(sessionId, { kind: 'player' })
+  const [params] = useSearchParams()
+  const gameHint = params.get('game')
+  const live = useLive<Player | AccessPlayer>(sessionId, { kind: 'player' })
+  const gameId = live.data?.gameId ?? gameHint
+
+  if (!live.data) {
+    const t = tr(null)
+    return (
+      <main className="phone-app">
+        <div className="phone-body">
+          <section className="waiting-card">
+            <InfoIcon />
+            <h2>
+              {live.error
+                ? (live.error.status === 403 || live.error.status === 404 ? t.sessionClosed : live.error.message)
+                : t.reconnecting}
+            </h2>
+          </section>
+        </div>
+      </main>
+    )
+  }
+
+  if (gameId === 'access') {
+    return (
+      <AccessPlay
+        sessionId={sessionId}
+        data={live.data as AccessPlayer}
+        status={live.status}
+        error={live.error}
+        refresh={live.refresh}
+      />
+    )
+  }
+
+  return <LogisticsPlay sessionId={sessionId} data={live.data as Player} status={live.status} error={live.error} refresh={live.refresh} />
+}
+
+function LogisticsPlay({
+  sessionId, data: view, status, error, refresh,
+}: {
+  sessionId: string
+  data: Player | null
+  status: string
+  error: { message: string; status?: number } | null
+  refresh: () => void
+}) {
   const [tab, setTab] = useState<Tab>('task')
   const [pending, setPending] = useState<string | null>(null)
   const [actionError, setActionError] = useState('')
@@ -99,7 +146,7 @@ export function Play() {
       <header className="phone-head">
         <span className="role-badge"><RoleIcon org={view.role} /></span>
         <div>
-          <h1>{ROLE_NAMES[view.language][view.role]}</h1>
+          <h1>{ROLE_NAMES[view.language][view.role as keyof typeof ROLE_NAMES.nl]}</h1>
           <small>
             <span className={`conn-dot${status === 'live' ? '' : ' off'}`} />
             {roleName}{view.displayName ? ` · ${view.displayName}` : ''}
@@ -115,7 +162,7 @@ export function Play() {
         {!round && (
           <section className="waiting-card">
             <RoleIcon org={view.role} />
-            <h2>{t.youAre} {ROLE_NAMES[view.language][view.role].toLowerCase()}</h2>
+            <h2>{t.youAre} {ROLE_NAMES[view.language][view.role as keyof typeof ROLE_NAMES.nl].toLowerCase()}</h2>
             <p>{roleName}</p>
             {view.ready ? (
               <p data-testid="ready-wait">{t.readyWait}</p>

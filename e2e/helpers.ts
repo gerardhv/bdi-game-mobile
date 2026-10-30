@@ -14,6 +14,7 @@ export async function openHost(browser: Browser, startMode: 'new' | 'bdi' = 'new
   const context = await browser.newContext({ viewport: { width: 1920, height: 1080 } })
   const page = await context.newPage()
   await page.goto('/#/')
+  await page.getByTestId('game-logistics').click()
   if (startMode === 'new') await page.getByTestId('start-session').click()
   else await page.getByRole('button', { name: 'Direct de BDI-ronde' }).click()
   await expect(page.getByTestId('session-code')).toBeVisible()

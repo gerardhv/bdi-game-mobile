@@ -1,4 +1,5 @@
-import type { Language, OrgId, PolicyAction, ResourceType, RoundState, SourceResource } from './types.js'
+import { ORGS } from './orgs.js'
+import type { Language, OrgId, PolicyAction, ResourceType, RoundState, SourceResource } from '../../types.js'
 
 export interface PolicyRule {
   owner: OrgId
@@ -60,9 +61,9 @@ export const POLICY_RULES: PolicyRule[] = [
   { owner: 'buyer', recipient: 'delivery', resourceType: 'receipt', action: 'read' },
 ]
 
-const PARTICIPANTS = new Set(['buyer', 'seller', 'carrier', 'delivery'])
+const PARTICIPANTS = new Set<string>(ORGS)
 
-export function isParticipant(org: string): org is OrgId {
+export function isParticipant(org: string): boolean {
   return PARTICIPANTS.has(org)
 }
 
