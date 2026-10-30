@@ -119,6 +119,16 @@ export function devAuthAllowed(): boolean {
   return process.env.NODE_ENV !== 'production' && !process.env.SUPABASE_URL
 }
 
+/** Open sessions allowed per client IP; null means no cap. The cap protects the hosted API, not a local one. */
+export function openSessionLimit(): number | null {
+  const configured = process.env.MAX_OPEN_SESSIONS_PER_IP
+  if (configured) {
+    const limit = Number(configured)
+    return Number.isFinite(limit) && limit > 0 ? limit : null
+  }
+  return process.env.NODE_ENV === 'production' ? 10 : null
+}
+
 const secret = () => {
   if (process.env.AUTH_SECRET) return process.env.AUTH_SECRET
   if (process.env.NODE_ENV === 'production' || process.env.ALLOW_DEV_AUTH === 'true') {
@@ -191,7 +201,7 @@ export class GameService {
   }
   async create(userId: string, input: { name?: string; language?: Language; startMode?: StartMode; gameId?: string }, creatorIp: string) {
     const now = new Date()
-    const maxOpen = Math.max(1, Number(process.env.MAX_OPEN_SESSIONS_PER_IP) || 10)
+    const maxOpen = openSessionLimit()
     const game = getGame(input.gameId)
     const startMode = input.startMode ?? game.defaultStartMode
     if (!game.startModes.includes(startMode)) {
@@ -212,13 +222,15 @@ export class GameService {
       gameId: game.id,
     })
     await this.store.run((db) => {
-      const openFromIp = db.list().filter((session) => session.status !== 'closed' && session.creatorIp === creatorIp)
-      if (openFromIp.length >= maxOpen) {
-        throw new GameError(
-          'limit',
-          `Je hebt al ${maxOpen} open spellen vanaf dit netwerk. Beëindig er een of wacht tot een verlaten spel wordt opgeruimd.`,
-          429,
-        )
+      if (maxOpen !== null) {
+        const openFromIp = db.list().filter((session) => session.status !== 'closed' && session.creatorIp === creatorIp)
+        if (openFromIp.length >= maxOpen) {
+          throw new GameError(
+            'limit',
+            `Je hebt al ${maxOpen} open spellen vanaf dit netwerk. Beëindig er een of wacht tot een verlaten spel wordt opgeruimd.`,
+            429,
+          )
+        }
       }
       db.save(state)
       return state

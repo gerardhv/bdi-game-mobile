@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api, apiUrl, setToken, withSlot } from './api'
 import { RoleIcon } from './art/icons'
@@ -16,6 +16,11 @@ type GameCard = {
   titles: { nl: string; en: string }
   blurbs: { nl: string; en: string }
   startModes: ('without_bdi' | 'only_bdi' | 'story')[]
+}
+
+const GAME_ORGS: Record<string, string[]> = {
+  logistics: [...ORGS],
+  access: ['admin', 'owner', 'registry', 'provider', 'consumer'],
 }
 
 export function Home() {
@@ -40,13 +45,14 @@ export function Home() {
       .catch(() => setError(t.offline))
   }, [t.offline])
 
-  async function create(startMode: 'without_bdi' | 'only_bdi' | 'story') {
-    if (!gameId) return
+  async function create(startMode: 'without_bdi' | 'only_bdi' | 'story', id = gameId) {
+    if (!id) return
     setBusy(true)
+    setGameId(id)
     try {
       const view = await api<Training>('/api/sessions', {
         method: 'POST',
-        body: JSON.stringify({ language: lang, startMode, gameId }),
+        body: JSON.stringify({ language: lang, startMode, gameId: id }),
       })
       const path = withSlot(`/host/${view.sessionId}`)
       if (window.top && window.top !== window) {
@@ -70,47 +76,66 @@ export function Home() {
     navigate(withSlot(`/join?code=${encodeURIComponent(code)}`))
   }
 
+  function primaryMode(game: GameCard): 'without_bdi' | 'only_bdi' | 'story' {
+    if (game.startModes.includes('story')) return 'story'
+    if (game.startModes.includes('without_bdi')) return 'without_bdi'
+    return game.startModes[0] ?? 'without_bdi'
+  }
+
   return (
     <main className="home">
-      <section className="home-card">
+      <section className={`home-card${(games?.length ?? 0) > 1 ? ' home-card-wide' : ''}`}>
         <Wordmark />
         <h1>{t.tagline}</h1>
-        {!selected && (
-          <>
-            <p className="home-sub">{t.chooseGame}</p>
-            <div className="game-list" data-testid="game-list">
-              {(games ?? []).map((game) => (
+        <p className="home-sub">{t.chooseGame}</p>
+        <div className="game-tiles" data-testid="game-list">
+          {(games ?? []).map((game) => {
+            const active = game.id === gameId
+            const orgs = GAME_ORGS[game.id] ?? ORGS
+            return (
+              <article
+                key={game.id}
+                className={`game-tile${active ? ' is-selected' : ''}`}
+                style={{ '--tile-accent': `var(--${orgs[0]})` } as CSSProperties}
+                data-testid={`game-${game.id}`}
+              >
                 <button
-                  key={game.id}
                   type="button"
-                  className="btn game-card"
-                  data-testid={`game-${game.id}`}
+                  className="game-tile-pick"
+                  aria-pressed={active}
                   onClick={() => setGameId(game.id)}
                 >
-                  <strong>{game.titles[lang]}</strong>
-                  <span>{game.blurbs[lang]}</span>
+                  <div className="home-roles game-tile-roles" aria-hidden="true">
+                    {orgs.map((org) => <RoleIcon key={org} org={org} />)}
+                  </div>
+                  <strong className="game-tile-title">{game.titles[lang]}</strong>
+                  <span className="game-tile-blurb">{game.blurbs[lang]}</span>
                 </button>
-              ))}
-            </div>
-          </>
-        )}
-        {selected && (
-          <>
-            <div className="home-roles" aria-hidden="true">
-              {(selected.id === 'access' ? ['admin', 'owner', 'provider', 'consumer'] : ORGS).map((org) => (
-                <RoleIcon key={org} org={org} />
-              ))}
-            </div>
-            <p className="home-sub"><strong>{selected.titles[lang]}</strong> — {selected.blurbs[lang]}</p>
-            {(games?.length ?? 0) > 1 && (
-              <button type="button" className="btn ghost" onClick={() => setGameId(null)}>{t.backToGames}</button>
-            )}
-            <button type="button" className="btn go" data-testid="start-session" disabled={busy} onClick={() => void create(selected.startModes.includes('story') ? 'story' : 'without_bdi')}>{t.newGame}</button>
-            {selected.startModes.includes('only_bdi') && (
-              <button type="button" className="btn" disabled={busy} onClick={() => void create('only_bdi')}>{t.onlyBdi}</button>
-            )}
-            <Link className="btn ghost" to={`/table?game=${encodeURIComponent(selected.id)}&slot=host`}>{t.allRoles}</Link>
-          </>
+                {active && (
+                  <div className="game-tile-actions">
+                    <button
+                      type="button"
+                      className="btn go"
+                      data-testid="start-session"
+                      disabled={busy}
+                      onClick={() => void create(primaryMode(game), game.id)}
+                    >
+                      {t.newGame}
+                    </button>
+                    {game.startModes.includes('only_bdi') && (
+                      <button type="button" className="btn" disabled={busy} onClick={() => void create('only_bdi', game.id)}>
+                        {t.onlyBdi}
+                      </button>
+                    )}
+                    <Link className="btn ghost" to={`/table?game=${encodeURIComponent(game.id)}&slot=host`}>{t.allRoles}</Link>
+                  </div>
+                )}
+              </article>
+            )
+          })}
+        </div>
+        {selected && (games?.length ?? 0) > 1 && (
+          <button type="button" className="btn ghost home-clear" onClick={() => setGameId(null)}>{t.backToGames}</button>
         )}
         <div className="divider" />
         <form onSubmit={(event) => void join(event)}>
@@ -220,7 +245,7 @@ export function TestTable() {
   if (!view || !phones) return <p className="table-wait">{t.testTablePrep}</p>
   return (
     <main className="test-table">
-      <div className="test-grid">
+      <div className="test-grid" style={{ '--test-cols': phones.length } as CSSProperties}>
         <iframe title="Beamer" src={`${window.location.href.split('#')[0]}#/host/${view.sessionId}?slot=host`} />
         {phones.map((phone) => <iframe key={`${view.sessionId}-${phone.label}`} title={phone.label} src={phone.src} />)}
       </div>

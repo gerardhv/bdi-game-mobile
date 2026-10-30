@@ -13,8 +13,8 @@ export const accessGame: GameDefinition = {
     en: 'Who may see this data?',
   },
   blurbs: {
-    nl: 'Onboarding, authenticatie, betrokkenheid en autorisatie binnen een Association.',
-    en: 'Onboarding, authentication, involvement and authorisation inside one Association.',
+    nl: 'Eén keer toetreden, per zending vastleggen, bij elk verzoek controleren: federatieve IAA in de praktijk.',
+    en: 'Join once, record per shipment, check every request: federated IAA in practice.',
   },
   startModes: [...START_MODES],
   defaultStartMode: 'story',

@@ -46,10 +46,12 @@ export function Join() {
   const taken = Boolean(requestedCard && !requestedCard.free)
   const card = taken ? undefined : requestedCard
 
-  function goPlay(sessionId: string, organizationId: string, gameId: string) {
-    const slot = identitySlot() || organizationId
+  function goPlay(sessionId: string, gameId: string) {
+    // The slot selects the stored token; switching slots after the claim would seat a different user.
+    const slot = identitySlot()
     const game = gameId || gameHint
-    const search = new URLSearchParams({ slot })
+    const search = new URLSearchParams()
+    if (slot) search.set('slot', slot)
     if (game) search.set('game', game)
     navigate(`/play/${sessionId}?${search.toString()}`)
   }
@@ -63,11 +65,11 @@ export function Join() {
         method: 'POST',
         body: JSON.stringify({ organizationId: role, inviteToken: invited ? invite : null, displayName: name }),
       })
-      goPlay(preview.sessionId, role, preview.gameId)
+      goPlay(preview.sessionId, preview.gameId)
     } catch (err) {
       const e = err as Error & { body?: { error?: string } }
       if (e.body?.error === 'already_seated') {
-        goPlay(preview.sessionId, role, preview.gameId)
+        goPlay(preview.sessionId, preview.gameId)
         return
       }
       setError(e.message || t.roleTaken)

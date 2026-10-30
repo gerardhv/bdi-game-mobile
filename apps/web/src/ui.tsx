@@ -26,9 +26,9 @@ export function Qr({ path }: { path: string }) {
 
 export function Wordmark({ light = false }: { light?: boolean }) {
   return (
-    <span className={`wordmark${light ? ' is-light' : ''}`} role="img" aria-label="BDI Game">
+    <span className={`wordmark${light ? ' is-light' : ''}`} role="img" aria-label="BDI Games">
       <BdiMark className="wordmark-mark" />
-      <span className="wordmark-text">BDI Game</span>
+      <span className="wordmark-text">BDI Games</span>
     </span>
   )
 }

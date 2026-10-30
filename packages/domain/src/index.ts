@@ -12,3 +12,9 @@ export { shuffle } from './shuffle.js'
 export { logisticsGame, LOGISTICS_GAME_ID } from './games/logistics/definition.js'
 export { accessGame, ACCESS_GAME_ID } from './games/access/definition.js'
 export type { AccessCommand } from './games/access/reduce.js'
+export type {
+  DossierItemId as AccessDossierItem,
+  Lookup as AccessLookup,
+  Outcome as AccessOutcome,
+  RequestCardId as AccessCardId,
+} from './games/access/scenario.js'

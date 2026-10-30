@@ -1,30 +1,62 @@
 import type { Ctx } from '../../runtime.js'
 import { GameError, type Language, type SessionState } from '../../types.js'
-import { decideCardRequest } from './decide.js'
-import { accessScenario, type CardId } from './scenario.js'
+import { allLayers, evidenceText, judgeDecision, lookupResult, outcomeOf, outcomeReason, payloadFor } from './decide.js'
 import {
+  accessActor,
+  dossierCard,
+  networkView,
+  policyCard,
+  questionCard,
+  remainingCards,
+  requestCard,
+  reviewCard,
+  type ChosenOption,
+} from './present.js'
+import {
+  accessScenario,
+  LOOKUPS,
+  OUTCOMES,
+  type DossierItemId,
+  type Layer,
+  type Lookup,
+  type Outcome,
+  type RequestCardId,
+} from './scenario.js'
+import {
+  activeRequest,
   blankAccess,
   currentPolicy,
+  PREDICTORS,
+  QUESTION_SCENES,
   t,
-  type AccessChecks,
-  type AccessFrame,
+  type AccessCard,
+  type AccessFeedback,
+  type AccessRequest,
   type AccessScene,
   type AccessState,
-  type DossierVersion,
+  type LayerStatus,
+  type NetworkView,
+  type Predictor,
+  type QuestionScene,
 } from './state.js'
-import type { AccessOrgId } from './orgs.js'
+import { ORGS, type AccessOrgId } from './orgs.js'
+
+export { accessActor } from './present.js'
+
+/** Time the other players get to predict before the provider may start checking. */
+export const PREDICT_MS = 15_000
+
+type Versioned = { userId: string; expectedVersion: number; actionId: string }
 
 export type AccessCommand =
-  | { type: 'accessSubmitDossier'; userId: string; expectedVersion: number; actionId: string; orgIdentity: boolean; representative: boolean; terms: boolean }
-  | { type: 'accessDossierDecision'; userId: string; expectedVersion: number; actionId: string; decision: 'commit' | 'return' }
-  | { type: 'accessRegisterSystem'; userId: string; expectedVersion: number; actionId: string; belongs: boolean; endpoint: boolean; credential: boolean }
-  | { type: 'accessChooseCredential'; userId: string; expectedVersion: number; actionId: string; credentialId: 'cred-valid' | 'cred-expired' }
-  | { type: 'accessCheckRequest'; userId: string; expectedVersion: number; actionId: string }
-  | { type: 'accessRegisterCarrier'; userId: string; expectedVersion: number; actionId: string }
-  | { type: 'accessCheckProofs'; userId: string; expectedVersion: number; actionId: string }
-  | { type: 'accessSetPolicy'; userId: string; expectedVersion: number; actionId: string; shareLoading: boolean; shareFinance: boolean }
-  | { type: 'accessAskCard'; userId: string; expectedVersion: number; actionId: string; cardId: CardId }
-  | { type: 'accessPredict'; userId: string; expectedVersion: number; actionId: string; guess: 'allow' | 'deny' }
+  | ({ type: 'accessSubmitDossier'; items: DossierItemId[] } & Versioned)
+  | ({ type: 'accessReviewDossier'; decision: 'admit' | 'return' } & Versioned)
+  | ({ type: 'accessAnswer'; optionId: string } & Versioned)
+  | ({ type: 'accessSetPolicy'; shareLoading: boolean; shareFinance: boolean } & Versioned)
+  | ({ type: 'accessSendRequest'; cardId: RequestCardId } & Versioned)
+  | ({ type: 'accessLookup'; source: Lookup } & Versioned)
+  | ({ type: 'accessDecide'; decision: 'deliver' | 'refuse' } & Versioned)
+  | { type: 'accessPredict'; userId: string; actionId: string; requestId: string; outcome: Outcome }
 
 function iso(ms: number): string {
   return new Date(ms).toISOString()
@@ -37,8 +69,7 @@ function plus(now: string, ms: number): string {
 function roleOf(session: SessionState, userId: string): AccessOrgId | null {
   const found = session.roles.find((role) => role.playerUserId === userId)?.organizationId
   if (!found) return null
-  if (found === 'admin' || found === 'owner' || found === 'provider' || found === 'consumer') return found
-  return null
+  return (ORGS as readonly string[]).includes(found) ? found as AccessOrgId : null
 }
 
 function requireAccess(session: SessionState): AccessState {
@@ -48,10 +79,12 @@ function requireAccess(session: SessionState): AccessState {
   return session.access
 }
 
-function assertActor(session: SessionState, userId: string, expected: AccessOrgId): AccessOrgId {
-  const org = roleOf(session, userId)
-  if (org !== expected) throw new GameError('forbidden', 'Deze rol is niet aan zet.', 403)
-  return org
+function assertActor(session: SessionState, userId: string, expected: AccessOrgId): void {
+  if (roleOf(session, userId) !== expected) throw new GameError('forbidden', 'Deze rol is niet aan zet.', 403)
+}
+
+function assertScene(access: AccessState, ...scenes: AccessScene[]): void {
+  if (!scenes.includes(access.scene)) throw new GameError('bad_step', 'Deze stap is niet actief.', 409)
 }
 
 function assertHold(access: AccessState, now: string): void {
@@ -70,39 +103,21 @@ function recordAttempt(access: AccessState, actionId: string, outcome: string): 
   access.attempts.push({ actionId, outcome })
 }
 
-function bump(access: AccessState): void {
-  access.version += 1
-}
-
-function hold(access: AccessState, ctx: Ctx): void {
-  access.holdUntil = plus(ctx.now, ctx.presentationMs)
-}
-
-function buildFrame(access: AccessState, language: Language, extra?: Partial<AccessFrame>): AccessFrame {
-  return {
-    prompt: null,
-    message: access.message,
-    actor: null,
-    checks: { ...access.checks },
-    requestLabel: null,
-    options: [],
-    selectedOptionId: null,
-    feedback: null,
-    feedbackOk: null,
-    ...extra,
-  }
+function hold(access: AccessState, ctx: Ctx, factor = 1): void {
+  access.holdUntil = plus(ctx.now, Math.round(ctx.presentationMs * factor))
 }
 
 function pushHistory(
   access: AccessState,
   language: Language,
   input: {
-    scene: AccessScene
-    actor: AccessOrgId | 'system' | 'host'
+    actor: AccessOrgId | 'host'
     type: string
     text: string
     result?: string | null
-    frame?: Partial<AccessFrame>
+    card: AccessCard
+    focus?: AccessRequest | null
+    network?: NetworkView
     at: string
   },
 ): void {
@@ -110,21 +125,57 @@ function pushHistory(
   access.history.push({
     sequence: access.projectionSeq,
     at: input.at,
-    scene: input.scene,
+    scene: access.scene,
     actor: input.actor,
     type: input.type,
     text: input.text,
     result: input.result ?? null,
-    frame: buildFrame(access, language, input.frame),
+    frame: {
+      scene: access.scene,
+      actor: accessActor(access),
+      message: access.message,
+      card: input.card,
+      network: input.network ?? networkView(access, language, input.focus),
+    },
   })
 }
 
-function setMessage(access: AccessState, language: Language, nl: string, en: string): void {
-  access.message = t(language, nl, en)
+/** Records the answer of a role; a wrong answer keeps the scene so the role can try again. */
+function answer(
+  access: AccessState,
+  role: AccessOrgId,
+  optionId: string,
+  ok: boolean,
+  text: string,
+  ctx: Ctx,
+): ChosenOption {
+  giveFeedback(access, { role, scene: access.scene, optionId, ok, text, at: ctx.now })
+  if (ok) {
+    delete access.wrongOptions[access.scene]
+  } else {
+    const wrong = access.wrongOptions[access.scene] ?? []
+    if (!wrong.includes(optionId)) wrong.push(optionId)
+    access.wrongOptions[access.scene] = wrong
+    access.mistakes.push({ role, scene: access.scene, optionId, at: ctx.now })
+  }
+  return { optionId, ok, feedback: text }
 }
 
-function pendingChecks(): AccessChecks {
-  return { identity: 'pending', membership: 'pending', involvement: 'pending', policy: 'pending' }
+function sharedPolicyNetwork(access: AccessState, language: Language): NetworkView {
+  const network = networkView(access, language)
+  network.lines.policy = 'ok'
+  network.highlight = 'provider'
+  return network
+}
+
+function giveFeedback(access: AccessState, feedback: AccessFeedback): void {
+  access.feedback = feedback
+  access.feedbackByRole ??= {}
+  access.feedbackByRole[feedback.role] = feedback
+}
+
+function setScene(access: AccessState, scene: AccessScene): void {
+  access.scene = scene
 }
 
 export function startAccessGame(session: SessionState, accessId: string, ctx: Ctx): Record<string, unknown> {
@@ -134,7 +185,7 @@ export function startAccessGame(session: SessionState, accessId: string, ctx: Ct
   }
   if (!session.access) {
     const ready = session.roles.filter((role) => role.playerUserId && role.ready)
-    if (new Set(ready.map((role) => role.organizationId)).size !== 4) {
+    if (new Set(ready.map((role) => role.organizationId)).size !== ORGS.length) {
       throw new GameError('not_ready', 'Alle rollen moeten gereed zijn.', 409)
     }
   }
@@ -143,17 +194,7 @@ export function startAccessGame(session: SessionState, accessId: string, ctx: Ct
   session.rounds = []
   session.status = 'running'
   session.comparison = false
-  setMessage(session.access, ctx.language,
-    'Eerst de eenmalige onboarding op organisatieniveau. Daarna volgt de herhalende cyclus: betrokkenheid, beleid, authenticatie en toegangsbeslissing.',
-    'First the one-time organisation-level onboarding. Then the repeating cycle: involvement, policy, authentication and the access decision.')
-  pushHistory(session.access, ctx.language, {
-    scene: 'dossier',
-    actor: 'host',
-    type: 'start',
-    text: t(ctx.language, 'Het spel start. Eerst de eenmalige onboarding van organisatie Delta.', 'The game starts. First the one-time onboarding of organisation Delta.'),
-    at: ctx.now,
-    frame: { actor: 'consumer', prompt: t(ctx.language, 'Stel het onboardingdossier samen', 'Assemble the onboarding dossier') },
-  })
+  announceStart(session.access, ctx, 'start')
   return { accessId }
 }
 
@@ -162,14 +203,23 @@ export function restartAccessGame(session: SessionState, accessId: string, ctx: 
   session.access = blankAccess(accessId, ctx.now)
   session.status = 'running'
   session.comparison = false
-  pushHistory(session.access, ctx.language, {
-    scene: 'dossier',
+  announceStart(session.access, ctx, 'restart')
+  return { accessId }
+}
+
+function announceStart(access: AccessState, ctx: Ctx, type: 'start' | 'restart'): void {
+  access.message = t(ctx.language,
+    'Vervoerder Delta wil zendinggegevens van Atlas ophalen. Eerst de eenmalige toetreding tot de Logistiek Association.',
+    'Carrier Delta wants to retrieve shipment data from Atlas. First the one-time onboarding to the Logistics Association.')
+  pushHistory(access, ctx.language, {
     actor: 'host',
-    type: 'restart',
-    text: t(ctx.language, 'Nieuwe spelrun gestart.', 'New game run started.'),
+    type,
+    text: type === 'start'
+      ? t(ctx.language, 'Het spel start.', 'The game starts.')
+      : t(ctx.language, 'Nieuwe spelrun gestart.', 'New game run started.'),
+    card: dossierCard(access, ctx.language),
     at: ctx.now,
   })
-  return { accessId }
 }
 
 export function tickAccess(session: SessionState, ctx: Ctx): Record<string, unknown> {
@@ -198,6 +248,8 @@ export function resumeAccess(session: SessionState, ctx: Ctx): void {
     const delta = new Date(ctx.now).getTime() - new Date(access.pauseStartedAt).getTime()
     access.metrics.pauseMs += Math.max(0, delta)
     if (access.holdUntil) access.holdUntil = plus(access.holdUntil, delta)
+    const request = activeRequest(access)
+    if (request && !request.predictionsClosed) request.predictUntil = plus(request.predictUntil, delta)
     access.pauseStartedAt = null
     access.paused = false
   }
@@ -213,12 +265,15 @@ export function releasePausesAccess(session: SessionState, ctx: Ctx): void {
 
 export function reduceAccess(session: SessionState, command: AccessCommand, ctx: Ctx): Record<string, unknown> {
   const access = requireAccess(session)
-  assertHold(access, ctx.now)
   if (access.paused) throw new GameError('paused', 'Het spel is gepauzeerd.', 409)
 
   const dup = duplicate(access, command.actionId)
   if (dup) return dup
 
+  // Predictions run in parallel with the provider and the presentation hold, so they skip both guards.
+  if (command.type === 'accessPredict') return predict(session, command)
+
+  assertHold(access, ctx.now)
   if (command.expectedVersion !== access.version) {
     throw new GameError('conflict', 'De stand is intussen veranderd.', 409)
   }
@@ -226,24 +281,18 @@ export function reduceAccess(session: SessionState, command: AccessCommand, ctx:
   switch (command.type) {
     case 'accessSubmitDossier':
       return submitDossier(session, command, ctx)
-    case 'accessDossierDecision':
-      return dossierDecision(session, command, ctx)
-    case 'accessRegisterSystem':
-      return registerSystem(session, command, ctx)
-    case 'accessChooseCredential':
-      return chooseCredential(session, command, ctx)
-    case 'accessCheckRequest':
-      return checkRequest(session, command, ctx)
-    case 'accessRegisterCarrier':
-      return registerCarrier(session, command, ctx)
-    case 'accessCheckProofs':
-      return checkProofs(session, command, ctx)
+    case 'accessReviewDossier':
+      return reviewDossier(session, command, ctx)
+    case 'accessAnswer':
+      return answerQuestion(session, command, ctx)
     case 'accessSetPolicy':
       return setPolicy(session, command, ctx)
-    case 'accessAskCard':
-      return askCard(session, command, ctx)
-    case 'accessPredict':
-      return predict(session, command, ctx)
+    case 'accessSendRequest':
+      return sendRequest(session, command, ctx)
+    case 'accessLookup':
+      return lookup(session, command, ctx)
+    case 'accessDecide':
+      return decide(session, command, ctx)
     default:
       throw new GameError('unknown', 'Onbekende actie.', 400)
   }
@@ -256,360 +305,200 @@ function submitDossier(
 ): Record<string, unknown> {
   const access = requireAccess(session)
   assertActor(session, command.userId, 'consumer')
-  if (access.scene !== 'dossier') throw new GameError('bad_step', 'Deze stap is niet actief.', 409)
-  const open = access.dossiers.find((d) => d.decision === 'pending')
-  if (open) throw new GameError('conflict', 'Er ligt al een dossier ter beoordeling.', 409)
-
-  const cards = {
-    orgIdentity: command.orgIdentity,
-    representative: command.representative,
-    terms: command.terms,
-  }
-  const complete = cards.orgIdentity && cards.representative && cards.terms
+  assertScene(access, 'dossier')
+  const known = new Set<string>(accessScenario.dossierItems.map((item) => item.id))
+  const items = [...new Set(command.items)].filter((id) => known.has(id)) as DossierItemId[]
+  if (items.length === 0) throw new GameError('empty', 'Kies minstens één onderdeel voor het dossier.', 409)
+  const missing = accessScenario.dossierItems
+    .filter((item) => item.required && !items.includes(item.id))
+    .map((item) => item.id as DossierItemId)
   const version = access.dossiers.length + 1
-  const dossier: DossierVersion = {
+  access.dossiers.push({
     version,
-    cards,
-    complete,
+    items,
+    missing,
+    asksAccess: items.includes('access'),
     submittedAt: ctx.now,
     decision: 'pending',
     decidedAt: null,
-  }
-  access.dossiers.push(dossier)
-  bump(access)
+  })
+  access.feedback = null
+  setScene(access, 'review')
+  access.version += 1
   recordAttempt(access, command.actionId, 'submitted')
+  access.message = t(ctx.language,
+    `Delta dient dossier v${version} in. De Association Admin beoordeelt het.`,
+    `Delta submits dossier v${version}. The Association Admin reviews it.`)
   pushHistory(access, ctx.language, {
-    scene: 'dossier',
     actor: 'consumer',
     type: 'dossier',
-    text: t(ctx.language, `Delta dient dossierversie ${version} in.`, `Delta submits dossier version ${version}.`),
+    text: access.message,
+    card: reviewCard(access, ctx.language),
     at: ctx.now,
-    frame: { actor: 'admin', prompt: t(ctx.language, 'Beoordeel het dossier', 'Review the dossier') },
   })
   hold(access, ctx)
-  return { version: access.version, dossierVersion: version, complete }
+  return { version: access.version, dossierVersion: version }
 }
 
-function dossierDecision(
+function missingReason(missing: DossierItemId[], asksAccess: boolean, language: Language): string {
+  const reasons: string[] = []
+  const texts: Record<DossierItemId, { nl: string; en: string }> = {
+    identity: { nl: 'Zonder identiteit weet niemand wie Delta is.', en: 'Without an identity nobody knows who Delta is.' },
+    mandate: { nl: 'Zonder mandaat is niet zeker dat de ondertekenaar namens Delta mag tekenen.', en: 'Without a mandate it is not certain the signatory may sign for Delta.' },
+    terms: { nl: 'Zonder ondertekend afsprakenstelsel gelden de afspraken niet voor Delta.', en: 'Without a signed trust framework the agreements do not bind Delta.' },
+    access: { nl: '', en: '' },
+  }
+  for (const id of missing) reasons.push(texts[id][language])
+  if (asksAccess) {
+    reasons.push(t(language,
+      'De Association verleent geen leesrecht op data van Atlas; dat bepaalt Atlas als Data Owner.',
+      'The Association grants no read access to data of Atlas; Atlas decides that as Data Owner.'))
+  }
+  return reasons.join(' ')
+}
+
+function reviewDossier(
   session: SessionState,
-  command: Extract<AccessCommand, { type: 'accessDossierDecision' }>,
+  command: Extract<AccessCommand, { type: 'accessReviewDossier' }>,
   ctx: Ctx,
 ): Record<string, unknown> {
   const access = requireAccess(session)
   assertActor(session, command.userId, 'admin')
-  if (access.scene !== 'dossier') throw new GameError('bad_step', 'Deze stap is niet actief.', 409)
-  const dossier = [...access.dossiers].reverse().find((d) => d.decision === 'pending')
-  if (!dossier) throw new GameError('bad_step', 'Er is geen dossier ter beoordeling.', 409)
+  assertScene(access, 'review')
+  const dossier = access.dossiers.at(-1)
+  if (!dossier || dossier.decision !== 'pending') throw new GameError('bad_step', 'Er is geen dossier ter beoordeling.', 409)
+  const admissible = dossier.missing.length === 0 && !dossier.asksAccess
+  const ok = (command.decision === 'admit') === admissible
+  const reason = missingReason(dossier.missing, dossier.asksAccess, ctx.language)
+  const text = ok
+    ? admissible
+      ? t(ctx.language,
+        'Juist. Delta is lid; identiteit, sleutelmateriaal en status staan in het Association Register. Lid zijn geeft nog geen toegang tot data.',
+        'Right. Delta is a member; identity, key material and status are in the Association Register. Membership does not yet give access to data.')
+      : t(ctx.language, `Terecht teruggegeven. ${reason}`, `Rightly returned. ${reason}`)
+    : admissible
+      ? t(ctx.language, 'Dit dossier is compleet. Teruggeven vertraagt alleen.', 'This dossier is complete. Returning it only causes delay.')
+      : t(ctx.language, `Niet toelaten. ${reason}`, `Do not admit. ${reason}`)
+  const card = reviewCard(access, ctx.language, answer(access, 'admin', command.decision, ok, text, ctx))
+  access.version += 1
+  recordAttempt(access, command.actionId, ok ? command.decision : 'wrong')
 
-  if (command.decision === 'commit') {
-    if (!dossier.complete) {
-      throw new GameError('incomplete', 'Een onvolledig dossier kan niet worden vastgelegd.', 409)
-    }
-    dossier.decision = 'committed'
+  if (ok) {
+    dossier.decision = admissible ? 'admitted' : 'returned'
     dossier.decidedAt = ctx.now
-    access.members[accessScenario.organizations.consumer.id] = 'active'
-    access.bvad = {
-      id: `bvad-${session.id}-delta-1`,
-      kind: 'bvad',
-      issuer: accessScenario.association.id,
-      subjectOrgId: accessScenario.organizations.consumer.id,
-      subjectSystemId: null,
-      context: null,
-      role: 'member',
-      status: 'active',
-      version: 1,
-      valid: true,
+    if (admissible) {
+      access.deltaStatus = 'active'
+      access.keyRegistered = true
+      setScene(access, 'involve')
+      access.message = t(ctx.language,
+        'Toetreding klaar, en dat gebeurt één keer. Nu legt Atlas vast wie bij zending T-101 hoort.',
+        'Onboarding done, and that happens once. Now Atlas records who belongs to shipment T-101.')
+    } else {
+      setScene(access, 'dossier')
+      access.message = t(ctx.language, 'Het dossier gaat terug naar Delta.', 'The dossier goes back to Delta.')
     }
-    access.checks = { identity: 'pending', membership: 'confirmed', involvement: 'pending', policy: 'pending' }
-    access.scene = 'involveRegister'
-    bump(access)
-    recordAttempt(access, command.actionId, 'committed')
-    setMessage(access, ctx.language,
-      'Eenmalige onboarding klaar: Delta is als organisatie aangesloten (BVAD). Nu begint de herhalende cyclus — eerst legt de Data Owner vast wie gegevens mag ophalen.',
-      'One-time onboarding done: Delta is admitted as an organisation (BVAD). Now the repeating cycle starts — first the Data Owner records who may retrieve data.')
-    pushHistory(access, ctx.language, {
-      scene: 'involveRegister',
-      actor: 'admin',
-      type: 'dossier_commit',
-      text: t(ctx.language, `Admin legt dossierversie ${dossier.version} vast. Organisatie Delta is aangesloten.`, `Admin commits dossier version ${dossier.version}. Organisation Delta is admitted.`),
-      result: 'ok',
-      at: ctx.now,
-      frame: {
-        actor: 'owner',
-        prompt: t(ctx.language, 'Leg vast wie gegevens mag ophalen voor T-101', 'Record who may retrieve data for T-101'),
-        checks: access.checks,
-      },
-    })
-    hold(access, ctx)
-    return { version: access.version, decision: 'commit' }
+  } else {
+    access.message = t(ctx.language, 'Niet juist. De Admin kiest opnieuw.', 'Not right. The Admin chooses again.')
   }
-
-  dossier.decision = 'returned'
-  dossier.decidedAt = ctx.now
-  bump(access)
-  recordAttempt(access, command.actionId, 'returned')
   pushHistory(access, ctx.language, {
-    scene: 'dossier',
     actor: 'admin',
-    type: 'dossier_return',
-    text: t(ctx.language, `Admin geeft dossierversie ${dossier.version} terug.`, `Admin returns dossier version ${dossier.version}.`),
-    result: 'returned',
+    type: ok ? `review_${command.decision}` : 'review_wrong',
+    text,
+    result: ok ? 'ok' : 'wrong',
+    card,
     at: ctx.now,
-    frame: { actor: 'consumer', prompt: t(ctx.language, 'Vul een nieuwe dossierversie aan', 'Complete a new dossier version') },
   })
   hold(access, ctx)
-  return { version: access.version, decision: 'return' }
+  return { version: access.version, ok }
 }
 
-function registerSystem(
+function answerQuestion(
   session: SessionState,
-  command: Extract<AccessCommand, { type: 'accessRegisterSystem' }>,
+  command: Extract<AccessCommand, { type: 'accessAnswer' }>,
   ctx: Ctx,
 ): Record<string, unknown> {
   const access = requireAccess(session)
-  assertActor(session, command.userId, 'consumer')
-  if (access.scene !== 'system') throw new GameError('bad_step', 'Deze stap is niet actief.', 409)
-  if (!(command.belongs && command.endpoint && command.credential)) {
-    throw new GameError('incomplete', 'Alle drie de systeemcontroles moeten bevestigd zijn.', 409)
-  }
-  access.systemChecks = { belongs: true, endpoint: true, credential: true }
-  access.systemRegistered = true
-  access.bvad = {
-    id: `bvad-${session.id}-delta-1`,
-    kind: 'bvad',
-    issuer: accessScenario.association.id,
-    subjectOrgId: accessScenario.organizations.consumer.id,
-    subjectSystemId: accessScenario.deltaSystem.id,
-    context: null,
-    role: 'member',
-    status: 'active',
-    version: 1,
-    valid: true,
-  }
-  access.checks = { identity: 'pending', membership: 'confirmed', involvement: 'pending', policy: 'pending' }
-  access.scene = 'authChoose'
-  bump(access)
-  recordAttempt(access, command.actionId, 'registered')
-  setMessage(access, ctx.language,
-    'Eenmalige onboarding klaar: Delta is aangesloten. Toegang tot transportgegevens volgt niet automatisch. Vanaf hier herhaalt zich per handeling: middel kiezen, betrokkenheid, beleid en beslissing van de Data Service Provider.',
-    'One-time onboarding done: Delta is connected. Access to transport data does not follow automatically. From here each action repeats: choose a credential, involvement, policy and the Data Service Provider decision.')
-  pushHistory(access, ctx.language, {
-    scene: 'authChoose',
-    actor: 'consumer',
-    type: 'system',
-    text: t(ctx.language, 'Delta registreert de planningsapplicatie. BVAD bevestigt actieve deelname (eenmalige onboarding).', 'Delta registers the planning application. BVAD confirms active participation (one-time onboarding).'),
-    result: 'ok',
-    at: ctx.now,
-    frame: {
-      actor: 'consumer',
-      prompt: t(ctx.language, 'Kies het digitale middel voor het verzoek', 'Choose the digital credential for the request'),
-      checks: access.checks,
-    },
-  })
-  hold(access, ctx)
-  return { version: access.version, bvad: true }
-}
-
-function chooseCredential(
-  session: SessionState,
-  command: Extract<AccessCommand, { type: 'accessChooseCredential' }>,
-  ctx: Ctx,
-): Record<string, unknown> {
-  const access = requireAccess(session)
-  assertActor(session, command.userId, 'consumer')
-  if (access.scene !== 'authChoose' && access.scene !== 'authCheck') {
+  if (!(QUESTION_SCENES as AccessScene[]).includes(access.scene)) {
     throw new GameError('bad_step', 'Deze stap is niet actief.', 409)
   }
-  access.selectedCredentialId = command.credentialId
-  access.scene = 'authCheck'
-  access.checks = { ...access.checks, identity: 'pending', involvement: 'pending', policy: 'pending' }
-  bump(access)
-  recordAttempt(access, command.actionId, 'chosen')
-  const label = command.credentialId === 'cred-valid'
-    ? t(ctx.language, 'geldige middel', 'valid credential')
-    : t(ctx.language, 'verlopen middel', 'expired credential')
+  const scene = access.scene as QuestionScene
+  const question = accessScenario.questions[scene]
+  assertActor(session, command.userId, question.actor)
+  const option = question.options.find((item) => item.id === command.optionId)
+  if (!option) throw new GameError('unknown', 'Onbekende keuze.', 400)
+
+  const card = questionCard(access, scene, ctx.language,
+    answer(access, question.actor, option.id, option.correct, option.feedback[ctx.language], ctx))
+  access.version += 1
+  recordAttempt(access, command.actionId, option.correct ? 'ok' : 'wrong')
+
+  if (!option.correct) {
+    access.message = t(ctx.language, 'Niet juist. Probeer het opnieuw.', 'Not right. Try again.')
+  } else {
+    applyAnswer(access, scene, ctx)
+  }
   pushHistory(access, ctx.language, {
-    scene: 'authCheck',
-    actor: 'consumer',
-    type: 'credential',
-    text: t(ctx.language, `Delta stuurt het verzoek met het ${label}.`, `Delta sends the request with the ${label}.`),
+    actor: question.actor,
+    type: `answer_${scene}`,
+    text: `${option.label[ctx.language]} — ${option.feedback[ctx.language]}`,
+    result: option.correct ? 'ok' : 'wrong',
+    card,
     at: ctx.now,
-    frame: {
-      actor: 'provider',
-      prompt: t(ctx.language, 'Controleer verzoek', 'Check request'),
-      requestLabel: t(ctx.language, 'Delta vraagt toegang tot de gegevensdienst', 'Delta asks for access to the data service'),
-    },
   })
   hold(access, ctx)
-  return { version: access.version, credentialId: command.credentialId }
+  return { version: access.version, ok: option.correct }
 }
 
-function checkRequest(
-  session: SessionState,
-  command: Extract<AccessCommand, { type: 'accessCheckRequest' }>,
-  ctx: Ctx,
-): Record<string, unknown> {
-  const access = requireAccess(session)
-  assertActor(session, command.userId, 'provider')
-  if (access.scene !== 'authCheck') throw new GameError('bad_step', 'Deze stap is niet actief.', 409)
-  if (!access.selectedCredentialId) throw new GameError('bad_step', 'Er is nog geen middel gekozen.', 409)
-
-  const expired = access.selectedCredentialId === accessScenario.credentials.expired.id
-  if (expired) {
-    access.checks = { identity: 'failed', membership: 'confirmed', involvement: 'pending', policy: 'pending' }
-    access.authenticated = false
-    access.scene = 'authChoose'
-    access.selectedCredentialId = null
-    bump(access)
-    recordAttempt(access, command.actionId, 'auth_failed')
-    setMessage(access, ctx.language,
-      'De organisatie is aangesloten, maar dit middel is niet meer geldig voor authenticatie.',
-      'The organisation is onboarded, but this credential is no longer valid for authentication.')
-    pushHistory(access, ctx.language, {
-      scene: 'authChoose',
-      actor: 'provider',
-      type: 'auth',
-      text: t(ctx.language, 'Authenticatie afgewezen: verlopen middel. Deelname blijft actief.', 'Authentication rejected: expired credential. Participation stays active.'),
-      result: 'failed',
-      at: ctx.now,
-      frame: { actor: 'consumer', checks: access.checks, feedbackOk: false },
-    })
-    hold(access, ctx)
-    return { version: access.version, authenticated: false }
+function applyAnswer(access: AccessState, scene: QuestionScene, ctx: Ctx): void {
+  const delta = accessScenario.organizations.consumer.id
+  switch (scene) {
+    case 'involve':
+      setScene(access, 'record')
+      access.message = t(ctx.language,
+        'Atlas meldt bij het Orchestration Register: T-101 · Delta · vervoerder.',
+        'Atlas reports to the Orchestration Register: T-101 · Delta · carrier.')
+      return
+    case 'record':
+      access.orchestration.push({ transportId: 'T-101', carrierOrgId: delta, role: 'carrier', status: 'active' })
+      access.registrations += 1
+      setScene(access, 'policy')
+      access.message = t(ctx.language,
+        'Vastgelegd: het register kan aantonen dat Delta bij T-101 hoort (BVOD). Nu bepaalt Atlas wat vervoerders mogen zien.',
+        'Recorded: the registry can prove that Delta belongs to T-101 (BVOD). Now Atlas decides what carriers may see.')
+      return
+    case 'change':
+      setScene(access, 'recordChange')
+      access.message = t(ctx.language,
+        'Atlas meldt de wijziging bij het Orchestration Register.',
+        'Atlas reports the change to the Orchestration Register.')
+      return
+    case 'recordChange':
+      for (const entry of access.orchestration) {
+        if (entry.transportId === 'T-101' && entry.carrierOrgId === delta) entry.status = 'ended'
+      }
+      access.orchestration.push(
+        { transportId: 'T-101', carrierOrgId: accessScenario.noord.id, role: 'carrier', status: 'active' },
+        { transportId: 'T-103', carrierOrgId: delta, role: 'carrier', status: 'active' },
+      )
+      access.registrations += 2
+      setScene(access, access.policyReview ? 'policy' : 'request')
+      access.message = access.policyReview
+        ? t(ctx.language,
+          'Vastgelegd. Delta blijft lid en houdt dezelfde sleutel. Atlas kijkt nog even naar het beleid.',
+          'Recorded. Delta stays a member and keeps the same key. Atlas takes another look at the policy.')
+        : t(ctx.language,
+          'Vastgelegd. Delta blijft lid en houdt dezelfde sleutel. Delta stuurt nieuwe verzoeken.',
+          'Recorded. Delta stays a member and keeps the same key. Delta sends new requests.')
+      return
+    case 'suspend':
+      access.deltaStatus = 'suspended'
+      access.stage = 3
+      setScene(access, 'request')
+      access.message = t(ctx.language,
+        'Delta staat op geschorst in het Association Register. Niemand heeft LogiData gebeld. Delta probeert nog één verzoek.',
+        'Delta is suspended in the Association Register. Nobody called LogiData. Delta tries one more request.')
+      return
   }
-
-  access.checks = { identity: 'confirmed', membership: 'confirmed', involvement: 'pending', policy: 'pending' }
-  access.authenticated = true
-  access.baseAccessToken = {
-    id: `base-${session.id}-1`,
-    kind: 'base_access',
-    issuer: accessScenario.organizations.provider.id,
-    subjectOrgId: accessScenario.organizations.consumer.id,
-    subjectSystemId: null,
-    context: null,
-    role: null,
-    status: 'active',
-    version: 1,
-    valid: true,
-  }
-  const triedExpired = access.history.some((h) => h.type === 'auth' && h.result === 'failed')
-  access.compareExpiredHint = triedExpired
-    ? null
-    : t(ctx.language,
-      'Ter vergelijking: met het verlopen middel zou authenticatie zijn afgewezen, terwijl deelname actief bleef.',
-      'For comparison: with the expired credential authentication would have been rejected while participation stayed active.')
-  access.scene = 'policyAsk'
-  bump(access)
-  recordAttempt(access, command.actionId, 'auth_ok')
-  setMessage(access, ctx.language,
-    'Authenticatie geslaagd. De Data Service Provider beoordeelt nu ieder gegevensverzoek met identiteit, deelname, vastgelegde betrokkenheid en het beleid.',
-    'Authentication succeeded. The Data Service Provider now judges each data request with identity, participation, recorded involvement and the policy.')
-  pushHistory(access, ctx.language, {
-    scene: 'policyAsk',
-    actor: 'provider',
-    type: 'auth',
-    text: t(ctx.language, 'Authenticatie geslaagd. Organisatie-identiteit bevestigd.', 'Authentication succeeded. Organisation identity confirmed.'),
-    result: 'ok',
-    at: ctx.now,
-    frame: {
-      actor: 'consumer',
-      prompt: t(ctx.language, 'Vraag gegevens op — de Data Service Provider beslist', 'Request data — the Data Service Provider decides'),
-      checks: access.checks,
-      feedbackOk: true,
-    },
-  })
-  hold(access, ctx)
-  return { version: access.version, authenticated: true }
-}
-
-function registerCarrier(
-  session: SessionState,
-  command: Extract<AccessCommand, { type: 'accessRegisterCarrier' }>,
-  ctx: Ctx,
-): Record<string, unknown> {
-  const access = requireAccess(session)
-  assertActor(session, command.userId, 'owner')
-  if (access.scene !== 'involveRegister') throw new GameError('bad_step', 'Deze stap is niet actief.', 409)
-
-  access.orchestration = access.orchestration.filter((item) => item.transportId !== 'T-101')
-  access.orchestration.push({
-    transportId: 'T-101',
-    carrierOrgId: accessScenario.organizations.consumer.id,
-    role: 'carrier',
-  })
-  access.bvodT101 = {
-    id: `bvod-${session.id}-t101-1`,
-    kind: 'bvod',
-    issuer: 'orchestration-registry',
-    subjectOrgId: accessScenario.organizations.consumer.id,
-    subjectSystemId: null,
-    context: 'T-101',
-    role: 'carrier',
-    status: 'active',
-    version: 1,
-    valid: true,
-  }
-  access.checks = { ...access.checks, involvement: 'confirmed', policy: 'pending' }
-  access.scene = 'policyEdit'
-  bump(access)
-  recordAttempt(access, command.actionId, 'carrier_registered')
-  setMessage(access, ctx.language,
-    'Betrokkenheid staat vast. Stel nu het beleid in. Authenticatie van de Data Consumer volgt daarna — de Data Service Provider beoordeelt pas dan een verzoek.',
-    'Involvement is set. Now set the policy. Authentication of the Data Consumer follows next — only then does the Data Service Provider judge a request.')
-  pushHistory(access, ctx.language, {
-    scene: 'policyEdit',
-    actor: 'owner',
-    type: 'orchestration',
-    text: t(ctx.language,
-      'Atlas legt Delta vast als partij die voor T-101 gegevens mag ophalen.',
-      'Atlas records Delta as the party that may retrieve data for T-101.'),
-    result: 'ok',
-    at: ctx.now,
-    frame: {
-      actor: 'owner',
-      prompt: t(ctx.language, 'Stel het toegangsbeleid in', 'Set the access policy'),
-      checks: access.checks,
-    },
-  })
-  hold(access, ctx)
-  return { version: access.version }
-}
-
-function checkProofs(
-  session: SessionState,
-  command: Extract<AccessCommand, { type: 'accessCheckProofs' }>,
-  ctx: Ctx,
-): Record<string, unknown> {
-  const access = requireAccess(session)
-  assertActor(session, command.userId, 'provider')
-  if (access.scene !== 'involveProofs') throw new GameError('bad_step', 'Deze stap is niet actief.', 409)
-  access.checks = {
-    identity: 'confirmed',
-    membership: 'confirmed',
-    involvement: 'confirmed',
-    policy: 'pending',
-  }
-  access.scene = 'policyEdit'
-  bump(access)
-  recordAttempt(access, command.actionId, 'proofs_ok')
-  setMessage(access, ctx.language,
-    'De Data Service Provider heeft BVAD en BVOD meegenomen. De Data Owner stelt nu het beleid in voordat verzoeken worden beoordeeld.',
-    'The Data Service Provider has taken BVAD and BVOD into account. The Data Owner now sets policy before requests are judged.')
-  pushHistory(access, ctx.language, {
-    scene: 'policyEdit',
-    actor: 'provider',
-    type: 'proofs',
-    text: t(ctx.language, 'BVAD en BVOD meegenomen in de afweging. Beleid volgt.', 'BVAD and BVOD included in the assessment. Policy is next.'),
-    result: 'ok',
-    at: ctx.now,
-    frame: {
-      actor: 'owner',
-      prompt: t(ctx.language, 'Stel het toegangsbeleid in', 'Set the access policy'),
-      checks: access.checks,
-    },
-  })
-  hold(access, ctx)
-  return { version: access.version }
 }
 
 function setPolicy(
@@ -619,241 +508,270 @@ function setPolicy(
 ): Record<string, unknown> {
   const access = requireAccess(session)
   assertActor(session, command.userId, 'owner')
-  const allowedScenes: AccessScene[] = ['policyEdit', 'policyAsk', 'revoke', 'restore']
-  if (!allowedScenes.includes(access.scene)) {
-    throw new GameError('bad_step', 'Deze stap is niet actief.', 409)
-  }
-
+  assertScene(access, 'policy')
   const current = currentPolicy(access)
-  if (current.shareLoading === command.shareLoading && current.shareFinance === command.shareFinance) {
-    recordAttempt(access, command.actionId, 'noop')
-    return { version: access.version, unchanged: true }
+  const changed = current.shareLoading !== command.shareLoading || current.shareFinance !== command.shareFinance
+  if (changed) {
+    access.policies.push({
+      version: current.version + 1,
+      shareLoading: command.shareLoading,
+      shareFinance: command.shareFinance,
+      at: ctx.now,
+    })
   }
-
-  const next = {
-    version: current.version + 1,
-    shareLoading: command.shareLoading,
-    shareFinance: command.shareFinance,
+  const policy = currentPolicy(access)
+  const card = policyCard(access, ctx.language)
+  card.kind = 'info'
+  card.news = null
+  card.prompt = changed
+    ? t(ctx.language, `Atlas legt beleid v${policy.version} vast bij LogiData.`, `Atlas records policy v${policy.version} at LogiData.`)
+    : t(ctx.language, `Atlas houdt beleid v${policy.version} bij LogiData.`, `Atlas keeps policy v${policy.version} at LogiData.`)
+  card.feedback = t(ctx.language,
+    'LogiData dwingt dit beleid af bij elk verzoek van een vervoerder. Atlas hoeft niet mee te kijken.',
+    'LogiData enforces this policy on every request from a carrier. Atlas does not need to watch.')
+  card.feedbackOk = true
+  const yes = t(ctx.language, 'ja', 'yes')
+  const no = t(ctx.language, 'nee', 'no')
+  giveFeedback(access, {
+    role: 'owner',
+    scene: 'policy',
+    optionId: 'policy',
+    ok: true,
+    text: t(ctx.language,
+      `Beleid v${policy.version} staat bij LogiData: vervoerders zien laadinformatie ${policy.shareLoading ? yes : no}, financiële gegevens ${policy.shareFinance ? yes : no}. LogiData past dit bij elk verzoek toe.`,
+      `Policy v${policy.version} is at LogiData: carriers see loading info ${policy.shareLoading ? yes : no}, financial data ${policy.shareFinance ? yes : no}. LogiData applies it on every request.`),
     at: ctx.now,
-  }
-  access.policies.push(next)
-
-  if (access.scene === 'policyEdit' || access.scene === 'policyAsk') {
-    access.policyProbe = {
-      policyVersion: next.version,
-      asked: [],
-      appropriate: next.shareLoading && !next.shareFinance,
-      oversharedFinance: next.shareFinance,
-    }
-    access.scene = access.authenticated ? 'policyAsk' : 'authChoose'
-  } else if (access.scene === 'revoke') {
-    if (!command.shareLoading) {
-      access.revokedOnce = true
-      access.scene = 'revokeAsk'
-    }
-  } else if (access.scene === 'restore') {
-    if (command.shareLoading && !command.shareFinance) {
-      access.restoredOnce = true
-      access.scene = 'restoreAsk'
-    }
-  }
-
-  bump(access)
-  recordAttempt(access, command.actionId, 'policy_set')
-  if (access.scene === 'authChoose') {
-    setMessage(access, ctx.language,
-      'Beleid staat. Nu authenticatie van de Data Consumer — daarna beoordeelt de Data Service Provider ieder verzoek.',
-      'Policy is set. Next: authenticate the Data Consumer — then the Data Service Provider judges each request.')
-  } else if (access.scene === 'policyAsk') {
-    setMessage(access, ctx.language,
-      'Beleid bijgewerkt. De Data Service Provider beoordeelt elk verzoek met identiteit, deelname, vastgelegde betrokkenheid en dit beleid.',
-      'Policy updated. The Data Service Provider judges each request with identity, participation, recorded involvement and this policy.')
-  }
-  const overshare = next.shareFinance
-    ? t(ctx.language, ' Meer gedeeld dan voor de opdracht nodig was.', ' More shared than needed for the assignment.')
-    : ''
-  const nextActor = access.scene === 'authChoose'
-    ? 'consumer'
-    : access.scene === 'policyAsk' || access.scene === 'revokeAsk' || access.scene === 'restoreAsk'
-      ? 'consumer'
-      : 'owner'
-  const nextPrompt = access.scene === 'authChoose'
-    ? t(ctx.language, 'Kies het digitale middel voor deze handeling', 'Choose the digital credential for this action')
-    : access.scene === 'revoke'
-      ? t(ctx.language, 'Trek leesrecht voor laadinformatie in', 'Revoke read access for loading info')
-      : access.scene === 'restore'
-        ? t(ctx.language, 'Herstel beperkte toestemming', 'Restore limited consent')
-        : t(ctx.language, 'Vraag gegevens op — de Data Service Provider beslist', 'Request data — the Data Service Provider decides')
+  })
+  access.policyReview = false
+  setScene(access, 'request')
+  access.version += 1
+  recordAttempt(access, command.actionId, changed ? 'policy_set' : 'policy_kept')
+  access.message = t(ctx.language,
+    'LogiData past dit beleid toe bij elk verzoek; Atlas hoeft niet mee te kijken. Nu stuurt Delta verzoeken.',
+    'LogiData applies this policy on every request; Atlas does not need to watch. Now Delta sends requests.')
   pushHistory(access, ctx.language, {
-    scene: access.scene,
     actor: 'owner',
     type: 'policy',
-    text: t(ctx.language,
-      `Atlas stelt beleid v${next.version}: laden ${next.shareLoading ? 'aan' : 'uit'}, financiën ${next.shareFinance ? 'aan' : 'uit'}.${overshare}`,
-      `Atlas sets policy v${next.version}: loading ${next.shareLoading ? 'on' : 'off'}, finance ${next.shareFinance ? 'on' : 'off'}.${overshare}`),
-    result: overshare ? 'overshare' : 'ok',
+    text: card.prompt,
+    result: policy.shareFinance ? 'overshare' : 'ok',
+    card,
+    network: sharedPolicyNetwork(access, ctx.language),
     at: ctx.now,
-    frame: {
-      actor: nextActor,
-      prompt: nextPrompt,
-      checks: access.checks,
-    },
   })
   hold(access, ctx)
-  return { version: access.version, policyVersion: next.version }
+  return { version: access.version, policyVersion: policy.version }
 }
 
-function askCard(
+function sendRequest(
   session: SessionState,
-  command: Extract<AccessCommand, { type: 'accessAskCard' }>,
+  command: Extract<AccessCommand, { type: 'accessSendRequest' }>,
   ctx: Ctx,
 ): Record<string, unknown> {
   const access = requireAccess(session)
   assertActor(session, command.userId, 'consumer')
-  const cardId = command.cardId
-  if (!accessScenario.cards[cardId]) throw new GameError('unknown', 'Onbekende gegevenskaart.', 400)
-
-  const scene = access.scene
-  if (scene !== 'policyAsk' && scene !== 'revokeAsk' && scene !== 'restoreAsk') {
-    throw new GameError('bad_step', 'Deze stap is niet actief.', 409)
+  assertScene(access, 'request')
+  if (!remainingCards(access).includes(command.cardId)) {
+    throw new GameError('bad_card', 'Deze verzoekkaart is niet (meer) beschikbaar.', 409)
   }
-
-  const credentialId = access.authenticated
-    ? accessScenario.credentials.valid.id
-    : access.selectedCredentialId
-  const decision = decideCardRequest(access, cardId, credentialId, ctx.language)
-  access.checks = decision.checks
-
-  const policyVersion = currentPolicy(access).version
-  const duplicateDelivery = access.requests.find(
-    (r) => r.cardId === cardId && r.policyVersion === policyVersion && r.allowed === decision.allowed,
-  )
-  if (duplicateDelivery && scene === 'policyAsk') {
-    recordAttempt(access, command.actionId, 'duplicate_request')
-    return { version: access.version, duplicate: true, allowed: duplicateDelivery.allowed }
-  }
-
-  const request = {
+  const request: AccessRequest = {
     id: `req-${access.requests.length + 1}`,
-    cardId,
-    at: ctx.now,
-    policyVersion,
-    allowed: decision.allowed,
-    reason: decision.reason,
-    checks: decision.checks,
-    payload: decision.payload,
-    credentialId: credentialId ?? accessScenario.credentials.valid.id,
+    cardId: command.cardId,
+    stage: access.stage,
+    sentAt: ctx.now,
+    predictUntil: plus(ctx.now, ctx.presentationMs + PREDICT_MS),
+    predictionsClosed: false,
+    predictions: {},
+    lookups: [],
+    wrongDecisions: [],
+    decision: null,
+    outcome: null,
+    finalLayers: null,
+    decidedAt: null,
+    policyVersion: null,
   }
   access.requests.push(request)
-  if (decision.allowed && decision.payload) {
-    access.received.push({ cardId, payload: decision.payload, at: ctx.now, requestId: request.id })
-  }
-
-  if (scene === 'policyAsk' && access.policyProbe) {
-    if (access.policyProbe.policyVersion === policyVersion && !access.policyProbe.asked.includes(cardId)) {
-      access.policyProbe.asked.push(cardId)
-    }
-    const policy = currentPolicy(access)
-    const appropriate = policy.shareLoading && !policy.shareFinance
-    const allAsked = (['load-T-101', 'finance-T-101', 'load-T-102'] as CardId[]).every((id) =>
-      access.requests.some((r) => r.cardId === id && r.policyVersion === policy.version),
-    )
-    if (appropriate && allAsked) {
-      access.scene = 'revoke'
-      setMessage(access, ctx.language,
-        'De Data Service Provider beoordeelde ieder verzoek met identiteit, deelname, betrokkenheid en beleid. Onboarding bleef een eenmalige stap; deze cyclus herhaalt zich per handeling.',
-        'The Data Service Provider judged each request with identity, participation, involvement and policy. Onboarding stayed a one-time step; this cycle repeats for every action.')
-    } else if (allAsked) {
-      access.scene = 'policyEdit'
-    }
-  }
-
-  if (scene === 'revokeAsk' && cardId === 'load-T-101' && !decision.allowed) {
-    access.scene = 'restore'
-    setMessage(access, ctx.language,
-      'Geen nieuwe onboarding nodig. Identiteit, deelname en transportrol zijn ongewijzigd; alleen de toestemming is veranderd. Dat is de herhalende cyclus.',
-      'No new onboarding needed. Identity, participation and transport role are unchanged; only consent changed. That is the repeating cycle.')
-  }
-
-  if (scene === 'restoreAsk' && cardId === 'load-T-101' && decision.allowed) {
-    access.scene = 'debrief'
-    access.metrics.endedAt = ctx.now
-    setMessage(access, ctx.language,
-      'Geen nieuwe onboarding nodig. Identiteit, deelname en transportrol zijn ongewijzigd; alleen de toestemming is veranderd. Dat is de herhalende cyclus.',
-      'No new onboarding needed. Identity, participation and transport role are unchanged; only consent changed. That is the repeating cycle.')
-  }
-
-  bump(access)
-  recordAttempt(access, command.actionId, decision.allowed ? 'allowed' : 'denied')
-  const title = accessScenario.cards[cardId].title[ctx.language]
+  access.feedback = null
+  setScene(access, 'check')
+  access.version += 1
+  recordAttempt(access, command.actionId, 'sent')
+  const title = accessScenario.requestCards[command.cardId].title[ctx.language]
+  access.message = t(ctx.language,
+    `Delta vraagt ${title}, met een token dat Delta zelf ondertekent. Voorspel op je telefoon wat LogiData doet.`,
+    `Delta asks for ${title}, with a token Delta signs itself. Predict on your phone what LogiData will do.`)
   pushHistory(access, ctx.language, {
-    scene: access.scene,
     actor: 'consumer',
     type: 'request',
-    text: t(ctx.language,
-      `Delta vraagt ${title}. Data Service Provider beslist: ${decision.reason}`,
-      `Delta asks for ${title}. Data Service Provider decides: ${decision.reason}`),
-    result: decision.allowed ? 'allowed' : 'denied',
+    text: access.message,
+    card: requestCard(access, request, ctx.language),
+    focus: request,
     at: ctx.now,
-    frame: {
-      actor: access.scene === 'revoke' || access.scene === 'restore' ? 'owner' : access.scene === 'debrief' ? null : 'consumer',
-      requestLabel: t(ctx.language, `Delta vraagt ${title}`, `Delta asks for ${title}`),
-      checks: access.checks,
-      feedback: decision.reason,
-      feedbackOk: decision.allowed,
-    },
   })
   hold(access, ctx)
-  return { version: access.version, allowed: decision.allowed, reason: decision.reason }
+  return { version: access.version, requestId: request.id }
+}
+
+function predictionsGate(access: AccessState, request: AccessRequest, now: string): void {
+  if (request.predictionsClosed) return
+  const all = PREDICTORS.every((role) => request.predictions[role])
+  if (!all && now < request.predictUntil) {
+    throw new GameError('predicting', 'De andere spelers voorspellen nog.', 409)
+  }
+  request.predictionsClosed = true
 }
 
 function predict(
   session: SessionState,
   command: Extract<AccessCommand, { type: 'accessPredict' }>,
+): Record<string, unknown> {
+  const access = requireAccess(session)
+  const role = roleOf(session, command.userId)
+  if (!role || !(PREDICTORS as readonly string[]).includes(role)) {
+    throw new GameError('forbidden', 'Deze rol voorspelt niet.', 403)
+  }
+  const request = activeRequest(access)
+  if (access.scene !== 'check' || !request || request.id !== command.requestId) {
+    throw new GameError('bad_step', 'Er is geen verzoek om te voorspellen.', 409)
+  }
+  if (request.predictionsClosed) throw new GameError('closed', 'De voorspellingen zijn gesloten.', 409)
+  if (!OUTCOMES.includes(command.outcome)) throw new GameError('unknown', 'Onbekende voorspelling.', 400)
+  if (request.predictions[role as Predictor]) throw new GameError('conflict', 'Je hebt al voorspeld.', 409)
+  request.predictions[role as Predictor] = command.outcome
+  recordAttempt(access, command.actionId, 'predicted')
+  return { version: access.version, predicted: true }
+}
+
+function lookup(
+  session: SessionState,
+  command: Extract<AccessCommand, { type: 'accessLookup' }>,
   ctx: Ctx,
 ): Record<string, unknown> {
   const access = requireAccess(session)
-  const org = roleOf(session, command.userId)
-  if (!org) throw new GameError('forbidden', 'Geen rol.', 403)
-  if (org === 'provider') throw new GameError('forbidden', 'De provider controleert, voorspelt niet.', 403)
-  bump(access)
-  recordAttempt(access, command.actionId, 'predict')
+  assertActor(session, command.userId, 'provider')
+  assertScene(access, 'check')
+  const request = activeRequest(access)
+  if (!request) throw new GameError('bad_step', 'Er is geen verzoek.', 409)
+  if (!LOOKUPS.includes(command.source)) throw new GameError('unknown', 'Onbekende bron.', 400)
+  if (request.lookups.some((item) => item.source === command.source)) {
+    throw new GameError('conflict', 'Deze bron is al geraadpleegd.', 409)
+  }
+  predictionsGate(access, request, ctx.now)
+  const result = lookupResult(access, request.cardId, command.source, ctx.now)
+  request.lookups.push(result)
+  access.version += 1
+  recordAttempt(access, command.actionId, `lookup_${command.source}`)
+  const failed = Object.values(result.layers).includes('failed')
+  const source = {
+    association: accessScenario.layers.membership.source,
+    orchestration: accessScenario.layers.involvement.source,
+    policy: accessScenario.layers.policy.source,
+  }[command.source][ctx.language]
+  const evidence = (Object.entries(result.layers) as [Layer, LayerStatus][])
+    .map(([layer, status]) => evidenceText(access, request.cardId, layer, status, ctx.language))
+    .join(' ')
+  access.message = `LogiData → ${source}: ${evidence}`
   pushHistory(access, ctx.language, {
-    scene: access.scene,
-    actor: org,
-    type: 'predict',
-    text: t(ctx.language,
-      `${accessScenario.organizations[org].roleLabel.nl} voorspelt: ${command.guess === 'allow' ? 'toegestaan' : 'geweigerd'}.`,
-      `${accessScenario.organizations[org].roleLabel.en} predicts: ${command.guess === 'allow' ? 'allowed' : 'denied'}.`),
+    actor: 'provider',
+    type: 'lookup',
+    text: access.message,
+    result: failed ? 'failed' : 'ok',
+    card: requestCard(access, request, ctx.language),
+    focus: request,
     at: ctx.now,
   })
-  return { version: access.version }
+  hold(access, ctx, 0.5)
+  return { version: access.version, source: command.source, failed }
 }
 
-export function accessActor(access: AccessState): AccessOrgId | null {
-  switch (access.scene) {
-    case 'dossier': {
-      const pending = access.dossiers.some((d) => d.decision === 'pending')
-      return pending ? 'admin' : 'consumer'
-    }
-    case 'system':
-    case 'authChoose':
-    case 'involveAsk':
-    case 'policyAsk':
-    case 'revokeAsk':
-    case 'restoreAsk':
-      return 'consumer'
-    case 'authCheck':
-    case 'involveProofs':
-      return 'provider'
-    case 'involveRegister':
-    case 'policyEdit':
-    case 'revoke':
-    case 'restore':
-      return 'owner'
-    case 'debrief':
-      return null
-    default:
-      return null
+function decide(
+  session: SessionState,
+  command: Extract<AccessCommand, { type: 'accessDecide' }>,
+  ctx: Ctx,
+): Record<string, unknown> {
+  const access = requireAccess(session)
+  assertActor(session, command.userId, 'provider')
+  assertScene(access, 'check')
+  const request = activeRequest(access)
+  if (!request) throw new GameError('bad_step', 'Er is geen verzoek.', 409)
+  predictionsGate(access, request, ctx.now)
+  const verdict = judgeDecision(access, request, command.decision, ctx.language)
+  access.version += 1
+
+  if (!verdict.ok) {
+    request.wrongDecisions.push({ decision: command.decision, at: ctx.now, feedback: verdict.feedback })
+    access.mistakes.push({ role: 'provider', scene: 'check', optionId: command.decision, at: ctx.now })
+    giveFeedback(access, { role: 'provider', scene: 'check', optionId: command.decision, ok: false, text: verdict.feedback, at: ctx.now })
+    recordAttempt(access, command.actionId, 'wrong')
+    access.message = t(ctx.language, `LogiData twijfelt: ${verdict.feedback}`, `LogiData hesitates: ${verdict.feedback}`)
+    pushHistory(access, ctx.language, {
+      actor: 'provider',
+      type: 'decision_wrong',
+      text: verdict.feedback,
+      result: 'wrong',
+      card: requestCard(access, request, ctx.language),
+      focus: request,
+      at: ctx.now,
+    })
+    hold(access, ctx)
+    return { version: access.version, ok: false }
   }
+
+  request.finalLayers = allLayers(access, request.cardId)
+  request.outcome = outcomeOf(request.finalLayers)
+  request.decision = command.decision
+  request.decidedAt = ctx.now
+  request.policyVersion = currentPolicy(access).version
+  if (request.outcome === 'delivered') {
+    access.received.push({
+      cardId: request.cardId,
+      transportId: accessScenario.requestCards[request.cardId].transportId,
+      payload: payloadFor(request.cardId, ctx.language),
+      at: ctx.now,
+      requestId: request.id,
+    })
+  }
+  const reason = outcomeReason(request.cardId, request.outcome, ctx.language)
+  // The phone shows the outcome as the request result, so an earlier hesitation can go.
+  access.feedback = { role: 'provider', scene: 'check', optionId: command.decision, ok: true, text: reason, at: ctx.now }
+  delete access.feedbackByRole.provider
+  recordAttempt(access, command.actionId, request.outcome)
+  const card = requestCard(access, request, ctx.language)
+  access.message = `${reason} ${advanceAfterRequest(access, ctx)}`
+  pushHistory(access, ctx.language, {
+    actor: 'provider',
+    type: 'decision',
+    text: reason,
+    result: request.outcome === 'delivered' ? 'delivered' : 'refused',
+    card,
+    focus: request,
+    at: ctx.now,
+  })
+  hold(access, ctx)
+  return { version: access.version, ok: true, outcome: request.outcome }
+}
+
+function advanceAfterRequest(access: AccessState, ctx: Ctx): string {
+  if (remainingCards(access).length > 0) {
+    setScene(access, 'request')
+    return t(ctx.language, 'Delta kiest het volgende verzoek.', 'Delta picks the next request.')
+  }
+  if (access.stage === 1) {
+    const stage1 = access.requests.filter((request) => request.stage === 1)
+    access.policyReview = stage1.some((request) => {
+      const kind = accessScenario.requestCards[request.cardId].kind
+      return (kind === 'loading' && request.finalLayers?.policy === 'failed')
+        || (kind === 'finance' && request.outcome === 'delivered')
+    })
+    access.stage = 2
+    setScene(access, 'change')
+    return t(ctx.language,
+      `Ronde 1 klaar: ${stage1.length} verzoeken, elk opnieuw gecontroleerd. Dan verandert er iets bij Atlas.`,
+      `Round 1 done: ${stage1.length} requests, each checked again. Then something changes at Atlas.`)
+  }
+  if (access.stage === 2) {
+    setScene(access, 'suspend')
+    return t(ctx.language, 'Dan krijgt de Association een melding over Delta.', 'Then the Association receives a report about Delta.')
+  }
+  setScene(access, 'debrief')
+  access.metrics.endedAt = ctx.now
+  return t(ctx.language, 'Einde van het spel. Tijd voor de nabespreking.', 'End of the game. Time for the debrief.')
 }

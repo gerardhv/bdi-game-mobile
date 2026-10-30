@@ -1,10 +1,99 @@
 import { getGame } from '../../catalog.js'
 import type { Language, SessionState } from '../../types.js'
 import { orgNameOf, roleLabelOf } from '../../game-definition.js'
-import { accessScenario, type CardId } from './scenario.js'
-import { accessActor } from './reduce.js'
-import { currentPolicy, t, type AccessChecks, type AccessScene, type AccessState } from './state.js'
+import { predictionCorrect } from './decide.js'
+import {
+  accessActor,
+  carrierName,
+  liveCard,
+  liveFocus,
+  networkView,
+  policyNews,
+  questionCard,
+  remainingCards,
+  requestView,
+  reviewCard,
+  reviewOptions,
+} from './present.js'
+import { accessScenario, LOOKUP_LAYERS, LOOKUPS, OUTCOMES, type Lookup, type Outcome, type RequestCardId } from './scenario.js'
+import {
+  activeRequest,
+  currentPolicy,
+  PREDICTORS,
+  t,
+  type AccessCard,
+  type AccessScene,
+  type AccessState,
+  type CardLine,
+  type NetworkView,
+  type Predictor,
+  type RequestCardView,
+} from './state.js'
 import type { AccessOrgId } from './orgs.js'
+
+export type AccessTask =
+  | { kind: 'dossier'; prompt: string; news: string | null; items: { id: string; label: string }[]; selected: string[] }
+  | { kind: 'question'; prompt: string; news: string | null; lines: CardLine[]; options: { id: string; label: string; wrong: boolean }[] }
+  | { kind: 'policy'; prompt: string; news: string | null; shareLoading: boolean; shareFinance: boolean }
+  | { kind: 'pick'; prompt: string; news: string | null; cards: { id: RequestCardId; title: string; note: string }[] }
+  | {
+    kind: 'check'
+    request: RequestCardView
+    lookups: { id: Lookup; label: string; done: boolean; failed: boolean }[]
+    waiting: string | null
+    predictUntil: string
+  }
+
+export type SidePanel = {
+  title: string
+  rows: { label: string; value: string; tone: 'ok' | 'bad' | 'muted' | null }[]
+  log: string[]
+  note: string | null
+}
+
+export type AccessDebrief = {
+  missions: { label: string; ok: boolean }[]
+  counts: { label: string; value: number }[]
+  scores: { role: Predictor; roleLabel: string; points: number; of: number }[]
+  mistakes: { role: AccessOrgId; roleLabel: string; count: number }[]
+  rules: { title: string; text: string; seen: boolean }[]
+  questions: string[]
+}
+
+export type AccessPlayPayload = {
+  id: string
+  version: number
+  scene: AccessScene
+  stage: number
+  canAct: boolean
+  waitingFor: string | null
+  actor: AccessOrgId | null
+  message: string | null
+  mission: string | null
+  task: AccessTask | null
+  feedback: { id: string; text: string; ok: boolean } | null
+  predict: null | {
+    requestId: string
+    title: string
+    options: { id: Outcome; label: string }[]
+    chosen: Outcome | null
+    open: boolean
+  }
+  lastResult: null | {
+    id: string
+    number: number
+    title: string
+    delivered: boolean
+    reason: string
+    prediction: string | null
+    correct: boolean | null
+  }
+  side: SidePanel
+  received: { cardId: string; title: string; payload: string; label: string; stale: boolean }[]
+  score: { points: number; of: number } | null
+  debrief: AccessDebrief | null
+  holdUntil: string | null
+}
 
 export type AccessPlayerView = {
   sessionId: string
@@ -25,38 +114,13 @@ export type AccessPlayerView = {
   access: null | AccessPlayPayload
 }
 
-export type AccessPlayPayload = {
-  id: string
-  version: number
-  scene: AccessState['scene']
-  canAct: boolean
-  waitingFor: string | null
-  actor: AccessOrgId | null
-  message: string | null
-  compareExpiredHint: string | null
-  checks: AccessChecks
-  checksLabels: { id: keyof AccessChecks; label: string; status: AccessChecks[keyof AccessChecks]; statusLabel: string }[]
-  prompt: string | null
-  dossier: null | {
-    pending: boolean
-    latest: AccessState['dossiers'][number] | null
-    cards: { id: string; label: string; included: boolean }[]
-  }
-  system: null | { checks: { id: string; label: string; done: boolean }[]; registered: boolean }
-  credentials: null | { id: string; label: string; status: string }[]
-  selectedCredentialId: string | null
-  policy: null | { shareLoading: boolean; shareFinance: boolean; version: number }
-  cards: null | { id: CardId; title: string; asked: boolean; lastAllowed: boolean | null; lastReason: string | null }[]
-  received: { cardId: CardId; title: string; payload: string; label: string }[]
-  proofs: { bvad: boolean; bvod: boolean }
-  debrief: null | {
-    missionDone: boolean
-    appropriateShare: boolean
-    restoreNeeded: boolean
-    oversharedFinance: boolean
-    questions: string[]
-  }
-  holdUntil: string | null
+export type AccessPhaseBand = {
+  id: 'once' | 'shipment' | 'request'
+  who: string
+  rhythm: string
+  countLabel: string
+  active: boolean
+  current: string | null
 }
 
 export type AccessTrainingView = {
@@ -85,30 +149,20 @@ export type AccessTrainingView = {
   access: null | {
     id: string
     version: number
-    scene: AccessState['scene']
+    scene: AccessScene
+    stage: number
     message: string | null
-    compareExpiredHint: string | null
     actor: AccessOrgId | null
-    checks: AccessChecks
-    checksLabels: AccessPlayPayload['checksLabels']
-    requestLabel: string | null
-    prompt: string | null
-    policy: { shareLoading: boolean; shareFinance: boolean; version: number }
-    members: { organizationId: string; name: string; status: string }[]
-    orchestration: { transportId: string; carrierName: string; role: string }[]
-    proofs: {
-      bvad: AccessState['bvad']
-      bvod: AccessState['bvodT101']
-      baseAccess: boolean
-    }
-    flights: { id: string; kind: 'proof' | 'data'; from: string; to: string; label: string }[]
-    received: AccessPlayPayload['received']
+    actorLabel: string | null
+    phases: { bands: AccessPhaseBand[]; debrief: boolean; debriefLabel: string }
+    card: AccessCard
+    network: NetworkView
+    scores: { role: Predictor; roleLabel: string; points: number; of: number }[]
     history: AccessState['history']
-    debrief: AccessPlayPayload['debrief']
+    debrief: AccessDebrief | null
     termCards: { term: string; text: string }[]
     holdUntil: string | null
     metrics: AccessState['metrics']
-    stepTrack: AccessStepTrack
   }
   rounds: []
   round: null
@@ -116,210 +170,379 @@ export type AccessTrainingView = {
   cursor: number
 }
 
-function checkLabels(checks: AccessChecks, language: Language): AccessPlayPayload['checksLabels'] {
-  const statusLabel = (status: AccessChecks[keyof AccessChecks]) => {
-    if (status === 'confirmed') return t(language, 'Bevestigd', 'Confirmed')
-    if (status === 'failed') return t(language, 'Niet in orde', 'Not in order')
-    if (status === 'unknown') return t(language, 'Niet vast te stellen', 'Cannot be established')
-    return t(language, 'Nog niet beoordeeld', 'Not yet assessed')
-  }
-  return [
-    { id: 'identity', label: t(language, 'Identiteit', 'Identity'), status: checks.identity, statusLabel: statusLabel(checks.identity) },
-    { id: 'membership', label: t(language, 'Association-deelname', 'Association participation'), status: checks.membership, statusLabel: statusLabel(checks.membership) },
-    { id: 'involvement', label: t(language, 'Transportbetrokkenheid', 'Transport involvement'), status: checks.involvement, statusLabel: statusLabel(checks.involvement) },
-    { id: 'policy', label: t(language, 'Toegang volgens beleid', 'Access under policy'), status: checks.policy, statusLabel: statusLabel(checks.policy) },
-  ]
+function inHold(access: AccessState, now: string): boolean {
+  return Boolean(access.holdUntil && now < access.holdUntil)
 }
 
 function waitingLabel(access: AccessState, language: Language): string {
   const actor = accessActor(access)
-  if (!actor) return t(language, 'Nabespreking', 'Debrief')
+  if (!actor) return t(language, 'Nabespreking op het grote scherm', 'Debrief on the big screen')
   return t(language,
-    `Wacht op ${accessScenario.organizations[actor].roleLabel.nl}`,
-    `Waiting for ${accessScenario.organizations[actor].roleLabel.en}`)
+    `Wacht op ${accessScenario.organizations[actor].roleLabel.nl} (${accessScenario.organizations[actor].name.nl})`,
+    `Waiting for ${accessScenario.organizations[actor].roleLabel.en} (${accessScenario.organizations[actor].name.en})`)
 }
 
-export type AccessPhase = 'once' | 'repeat'
-export type AccessStepId = 'onboard' | 'involve' | 'policy' | 'auth' | 'request' | 'debrief'
-
-export type AccessStepTrack = {
-  phase: AccessPhase
-  onceLabel: string
-  repeatLabel: string
-  steps: { id: AccessStepId; band: AccessPhase; label: string; status: 'done' | 'active' | 'todo' }[]
+function scores(access: AccessState, language: Language): AccessDebrief['scores'] {
+  const resolved = access.requests.filter((request) => request.finalLayers)
+  return PREDICTORS.map((role) => ({
+    role,
+    roleLabel: accessScenario.organizations[role].roleLabel[language],
+    points: resolved.filter((request) => {
+      const predicted = request.predictions[role]
+      return predicted ? predictionCorrect(predicted, request.finalLayers!) : false
+    }).length,
+    of: resolved.length,
+  }))
 }
 
-function stepIdForScene(scene: AccessScene): AccessStepId {
-  switch (scene) {
-    case 'dossier':
-    case 'system':
-      return 'onboard'
-    case 'involveAsk':
-    case 'involveRegister':
-    case 'involveProofs':
-      return 'involve'
-    case 'policyEdit':
-    case 'revoke':
-    case 'restore':
-      return 'policy'
-    case 'authChoose':
-    case 'authCheck':
-      return 'auth'
-    case 'policyAsk':
-    case 'revokeAsk':
-    case 'restoreAsk':
-      return 'request'
-    case 'debrief':
-      return 'debrief'
+function phases(access: AccessState, language: Language): { bands: AccessPhaseBand[]; debrief: boolean; debriefLabel: string } {
+  const scene = access.scene
+  const admitted = access.dossiers.filter((dossier) => dossier.decision === 'admitted').length
+  const checked = access.requests.filter((request) => request.outcome).length
+  const active = activeRequest(access)
+  const onceScenes: AccessScene[] = ['dossier', 'review', 'suspend']
+  const shipmentScenes: AccessScene[] = ['involve', 'record', 'policy', 'change', 'recordChange']
+  const requestScenes: AccessScene[] = ['request', 'check']
+  const currentFor = (): string | null => {
+    switch (scene) {
+      case 'dossier': return t(language, 'Delta stelt een dossier samen', 'Delta assembles a dossier')
+      case 'review': return t(language, 'Admin beoordeelt het dossier', 'Admin reviews the dossier')
+      case 'suspend': return t(language, 'Melding over Delta', 'Report about Delta')
+      case 'involve': return t(language, 'Atlas regelt T-101', 'Atlas arranges T-101')
+      case 'record': return t(language, 'Register legt T-101 vast', 'Registry records T-101')
+      case 'policy': return t(language, 'Atlas zet het beleid', 'Atlas sets the policy')
+      case 'change': return t(language, 'Vervoerder vervangen', 'Carrier replaced')
+      case 'recordChange': return t(language, 'Register legt wijziging vast', 'Registry records the change')
+      case 'request': return t(language, 'Delta kiest een verzoek', 'Delta picks a request')
+      case 'check': return active
+        ? t(language, `Verzoek ${access.requests.indexOf(active) + 1}`, `Request ${access.requests.indexOf(active) + 1}`)
+        : null
+      default: return null
+    }
   }
-}
-
-export function accessStepTrack(access: AccessState, language: Language): AccessStepTrack {
-  const active = stepIdForScene(access.scene)
-  const defs: { id: AccessStepId; band: AccessPhase; nl: string; en: string }[] = [
-    { id: 'onboard', band: 'once', nl: 'Onboarding', en: 'Onboarding' },
-    { id: 'involve', band: 'repeat', nl: 'Betrokkenheid', en: 'Involvement' },
-    { id: 'policy', band: 'repeat', nl: 'Beleid', en: 'Policy' },
-    { id: 'auth', band: 'repeat', nl: 'Authenticatie', en: 'Authentication' },
-    { id: 'request', band: 'repeat', nl: 'Verzoek', en: 'Request' },
-    { id: 'debrief', band: 'repeat', nl: 'Nabespreking', en: 'Debrief' },
-  ]
-  const activeIndex = defs.findIndex((d) => d.id === active)
+  const once = t(language, `${admitted}× toegetreden`, `${admitted}× joined`)
   return {
-    phase: active === 'onboard' ? 'once' : 'repeat',
-    onceLabel: t(language, 'Eenmalig', 'One-time'),
-    repeatLabel: t(language, 'Herhalend per handeling', 'Repeating per action'),
-    steps: defs.map((def, index) => ({
-      id: def.id,
-      band: def.band,
-      label: language === 'en' ? def.en : def.nl,
-      status: index < activeIndex ? 'done' : index === activeIndex ? 'active' : 'todo',
-    })),
+    bands: [
+      {
+        id: 'once',
+        who: 'Association',
+        rhythm: t(language, 'Eenmalig', 'Once'),
+        countLabel: access.deltaStatus === 'suspended' ? `${once} · ${t(language, '1× geschorst', '1× suspended')}` : once,
+        active: onceScenes.includes(scene),
+        current: onceScenes.includes(scene) ? currentFor() : null,
+      },
+      {
+        id: 'shipment',
+        who: 'Data Owner',
+        rhythm: t(language, 'Per zending', 'Per shipment'),
+        countLabel: t(language, `${access.registrations}× vastgelegd`, `${access.registrations}× recorded`),
+        active: shipmentScenes.includes(scene),
+        current: shipmentScenes.includes(scene) ? currentFor() : null,
+      },
+      {
+        id: 'request',
+        who: 'Data Service Provider',
+        rhythm: t(language, 'Bij elk verzoek', 'On every request'),
+        countLabel: t(language, `${checked}× gecontroleerd`, `${checked}× checked`),
+        active: requestScenes.includes(scene),
+        current: requestScenes.includes(scene) ? currentFor() : null,
+      },
+    ],
+    debrief: scene === 'debrief',
+    debriefLabel: t(language, 'Nabespreking', 'Debrief'),
   }
 }
 
-function promptFor(access: AccessState, role: AccessOrgId, language: Language): string | null {
-  const actor = accessActor(access)
-  if (actor !== role) return null
+function debrief(access: AccessState, language: Language): AccessDebrief | null {
+  if (access.scene !== 'debrief') return null
+  const delivered = (id: RequestCardId) => access.requests.some((request) => request.cardId === id && request.outcome === 'delivered')
+  const financeOut = access.received.some((item) => accessScenario.requestCards[item.cardId].kind === 'finance')
+  const outcomes = new Set(access.requests.map((request) => request.outcome).filter(Boolean))
+  const mistakes = new Map<AccessOrgId, number>()
+  for (const mistake of access.mistakes) mistakes.set(mistake.role, (mistakes.get(mistake.role) ?? 0) + 1)
+  return {
+    missions: [
+      { label: t(language, 'Delta kon T-101 plannen', 'Delta could plan T-101'), ok: delivered('r-load-101') },
+      { label: t(language, 'Delta kon T-103 plannen', 'Delta could plan T-103'), ok: delivered('r-load-103') },
+      { label: t(language, 'Tarief en marge bleven bij Atlas', 'Rate and margin stayed with Atlas'), ok: !financeOut },
+    ],
+    counts: [
+      { label: t(language, 'Toetreding', 'Onboarding'), value: access.dossiers.filter((dossier) => dossier.decision === 'admitted').length },
+      { label: t(language, 'Registraties in het Orchestration Register', 'Records in the Orchestration Register'), value: access.registrations },
+      { label: t(language, 'Verzoeken gecontroleerd', 'Requests checked'), value: access.requests.filter((request) => request.outcome).length },
+      { label: t(language, 'Bronnen geraadpleegd door LogiData', 'Sources consulted by LogiData'), value: access.requests.reduce((sum, request) => sum + request.lookups.length, 0) },
+    ],
+    scores: scores(access, language),
+    mistakes: [...mistakes.entries()].map(([role, count]) => ({
+      role,
+      roleLabel: accessScenario.organizations[role].roleLabel[language],
+      count,
+    })),
+    rules: accessScenario.rules.map((rule) => ({
+      title: rule.title[language],
+      text: rule.text[language],
+      seen: rule.id === 'relation-ends'
+        ? access.requests.some((request) => request.cardId === 'r-again-101' && request.outcome)
+        : rule.shownBy === null || outcomes.has(rule.shownBy),
+    })),
+    questions: accessScenario.debriefQuestions.map((question) => question[language]),
+  }
+}
+
+function lookupLog(access: AccessState, source: Lookup, language: Language): string[] {
+  const lines: string[] = []
+  access.requests.forEach((request, index) => {
+    const result = request.lookups.find((item) => item.source === source)
+    if (!result) return
+    const card = accessScenario.requestCards[request.cardId]
+    const failed = LOOKUP_LAYERS[source].some((layer) => result.layers[layer] === 'failed')
+    const answer = failed ? t(language, 'nee', 'no') : t(language, 'ja', 'yes')
+    const question = {
+      association: t(language, 'is dit echt Delta en is Delta lid?', 'is this really Delta and is Delta a member?'),
+      orchestration: t(language, `hoort Delta bij ${card.transportId}?`, `does Delta belong to ${card.transportId}?`),
+      policy: t(language, `mag een vervoerder ${card.kind === 'finance' ? 'financiële gegevens' : 'laadinformatie'} zien?`, `may a carrier see ${card.kind === 'finance' ? 'financial data' : 'loading info'}?`),
+    }[source]
+    lines.push(t(language, `Verzoek ${index + 1}: LogiData vroeg: ${question} → ${answer}`, `Request ${index + 1}: LogiData asked: ${question} → ${answer}`))
+  })
+  return lines.reverse().slice(0, 4)
+}
+
+function sidePanel(access: AccessState, role: AccessOrgId, language: Language): SidePanel {
+  const policy = currentPolicy(access)
+  const network = networkView(access, language)
+  const yes = t(language, 'ja', 'yes')
+  const no = t(language, 'nee', 'no')
+  switch (role) {
+    case 'admin':
+      return {
+        title: t(language, 'Jouw Association Register', 'Your Association Register'),
+        rows: [
+          ...(['owner', 'registry', 'provider'] as const).map((org) => ({
+            label: accessScenario.organizations[org].name[language],
+            value: t(language, 'actief lid', 'active member'),
+            tone: 'ok' as const,
+          })),
+          {
+            label: accessScenario.organizations.consumer.name[language],
+            value: network.delta.statusLabel + (access.keyRegistered ? t(language, ' · sleutel geregistreerd', ' · key registered') : ''),
+            tone: access.deltaStatus === 'active' ? 'ok' : access.deltaStatus === 'suspended' ? 'bad' : 'muted',
+          },
+        ],
+        log: lookupLog(access, 'association', language),
+        note: t(language, 'Je kent leden, sleutels en status. Zendingdata zie je nooit.', 'You know members, keys and status. You never see shipment data.'),
+      }
+    case 'registry':
+      return {
+        title: t(language, 'Jouw Orchestration Register', 'Your Orchestration Register'),
+        rows: network.orchestration.map((entry) => ({
+          label: `${entry.transportId} · ${t(language, 'vervoerder', 'carrier')}`,
+          value: entry.status === 'ended' ? `${entry.carrier} (${t(language, 'vervallen', 'ended')})` : entry.carrier,
+          tone: entry.status === 'ended' ? 'muted' : 'ok',
+        })),
+        log: lookupLog(access, 'orchestration', language),
+        note: t(language, 'Je legt feiten vast, geen toestemming. Zendingdata zie je nooit.', 'You record facts, not permissions. You never see shipment data.'),
+      }
+    case 'owner':
+      return {
+        title: t(language, 'Jouw zendingen en beleid', 'Your shipments and policy'),
+        rows: [
+          ...(['T-101', 'T-102', 'T-103'] as const).map((id) => {
+            const entry = access.orchestration.find((item) => item.transportId === id && item.status === 'active')
+            return {
+              label: `${id} · ${accessScenario.transports[id].route[language]}`,
+              value: entry ? carrierName(entry.carrierOrgId, language) : t(language, 'nog niet vastgelegd', 'not recorded yet'),
+              tone: entry ? 'ok' as const : 'muted' as const,
+            }
+          }),
+          { label: t(language, `Beleid v${policy.version} bij LogiData · laadinformatie`, `Policy v${policy.version} at LogiData · loading info`), value: policy.shareLoading ? yes : no, tone: null },
+          { label: t(language, `Beleid v${policy.version} bij LogiData · financiële gegevens`, `Policy v${policy.version} at LogiData · financial data`), value: policy.shareFinance ? yes : no, tone: null },
+        ],
+        log: lookupLog(access, 'policy', language),
+        note: t(language, 'LogiData past je beleid toe bij elk verzoek. Je hoeft niet mee te kijken.', 'LogiData applies your policy on every request. You do not need to watch.'),
+      }
+    case 'provider': {
+      const resolved = access.requests.filter((request) => request.outcome)
+      return {
+        title: t(language, 'LogiData · BDI Connector', 'LogiData · BDI Connector'),
+        rows: [
+          { label: t(language, 'Verzoeken beoordeeld', 'Requests judged'), value: String(resolved.length), tone: null },
+          { label: t(language, 'Geleverd', 'Delivered'), value: String(resolved.filter((r) => r.outcome === 'delivered').length), tone: 'ok' },
+          { label: t(language, 'Geweigerd', 'Refused'), value: String(resolved.filter((r) => r.outcome !== 'delivered').length), tone: 'bad' },
+        ],
+        log: resolved.slice(-4).reverse().map((request) => {
+          const card = accessScenario.requestCards[request.cardId]
+          return `${card.title[language]} → ${accessScenario.outcomes[request.outcome!][language]}`
+        }),
+        note: t(language, 'Jij beslist, lokaal en bij elk verzoek opnieuw.', 'You decide, locally and again on every request.'),
+      }
+    }
+    case 'consumer':
+      return {
+        title: accessScenario.organizations.consumer.name[language],
+        rows: [
+          { label: t(language, 'Lidmaatschap', 'Membership'), value: network.delta.statusLabel, tone: access.deltaStatus === 'active' ? 'ok' : access.deltaStatus === 'suspended' ? 'bad' : 'muted' },
+          { label: t(language, 'Sleutelmateriaal', 'Key material'), value: access.keyRegistered ? t(language, 'geregistreerd', 'registered') : t(language, 'nog niet geregistreerd', 'not registered yet'), tone: access.keyRegistered ? 'ok' : 'muted' },
+        ],
+        log: [],
+        note: null,
+      }
+  }
+}
+
+function taskFor(access: AccessState, role: AccessOrgId, language: Language, now: string): AccessTask | null {
+  if (accessActor(access) !== role) return null
   switch (access.scene) {
-    case 'dossier':
-      return role === 'consumer'
-        ? t(language, 'Stel het eenmalige onboardingdossier samen', 'Assemble the one-time onboarding dossier')
-        : t(language, 'Beoordeel het onboardingdossier', 'Review the onboarding dossier')
-    case 'system':
-      return t(language, 'Onboarding afronden', 'Finish onboarding')
-    case 'authChoose':
-      return t(language, 'Kies het digitale middel van de organisatie', 'Choose the organisation digital credential')
-    case 'authCheck':
-      return t(language, 'Controleer authenticatie van de organisatie', 'Check organisation authentication')
-    case 'involveAsk':
-      return t(language, 'Vraag laadinformatie T-101', 'Request loading info T-101')
-    case 'involveRegister':
-      return t(language, 'Leg vast wie gegevens mag ophalen voor T-101', 'Record who may retrieve data for T-101')
-    case 'involveProofs':
-      return t(language, 'Neem BVAD en BVOD mee in de afweging', 'Include BVAD and BVOD in the assessment')
-    case 'policyEdit':
-      return t(language, 'Stel het toegangsbeleid in', 'Set the access policy')
-    case 'policyAsk':
-      return t(language, 'Vraag gegevens op — de Data Service Provider beslist', 'Request data — the Data Service Provider decides')
-    case 'revoke':
-      return t(language, 'Trek leesrecht voor laadinformatie in', 'Revoke loading-info read access')
-    case 'revokeAsk':
-      return t(language, 'Vraag laadinformatie T-101 opnieuw', 'Request loading info T-101 again')
-    case 'restore':
-      return t(language, 'Herstel beperkte toestemming', 'Restore limited consent')
-    case 'restoreAsk':
-      return t(language, 'Vraag laadinformatie T-101 opnieuw', 'Request loading info T-101 again')
+    case 'dossier': {
+      const previous = access.dossiers.at(-1)
+      const card = liveCard(access, language)
+      return {
+        kind: 'dossier',
+        prompt: card.prompt ?? '',
+        news: previous?.decision === 'returned' && access.feedback?.scene === 'review'
+          ? access.feedback.text
+          : null,
+        items: accessScenario.dossierItems.map((item) => ({ id: item.id, label: item.label[language] })),
+        selected: previous ? [...previous.items] : [],
+      }
+    }
+    case 'review': {
+      const card = reviewCard(access, language)
+      const wrong = access.wrongOptions.review ?? []
+      return {
+        kind: 'question',
+        prompt: card.prompt ?? '',
+        news: card.news,
+        lines: card.lines,
+        options: reviewOptions(language).map((option) => ({ ...option, wrong: wrong.includes(option.id) })),
+      }
+    }
+    case 'involve':
+    case 'record':
+    case 'change':
+    case 'recordChange':
+    case 'suspend': {
+      const card = questionCard(access, access.scene, language)
+      return {
+        kind: 'question',
+        prompt: card.prompt ?? '',
+        news: card.news,
+        lines: card.lines,
+        options: card.options.map((option) => ({ id: option.id, label: option.label, wrong: option.state === 'wrong' })),
+      }
+    }
+    case 'policy': {
+      const policy = currentPolicy(access)
+      return {
+        kind: 'policy',
+        prompt: liveCard(access, language).prompt ?? '',
+        news: policyNews(access, language),
+        shareLoading: policy.shareLoading,
+        shareFinance: policy.shareFinance,
+      }
+    }
+    case 'request':
+      return {
+        kind: 'pick',
+        prompt: t(language, 'Welk verzoek stuurt je planningssysteem nu?', 'Which request does your planning system send now?'),
+        news: access.stage === 1 ? accessScenario.missions.consumer[language] : null,
+        cards: remainingCards(access).map((id) => ({
+          id,
+          title: accessScenario.requestCards[id].title[language],
+          note: accessScenario.requestCards[id].note[language],
+        })),
+      }
+    case 'check': {
+      const request = activeRequest(access)
+      if (!request) return null
+      const count = PREDICTORS.filter((predictor) => request.predictions[predictor]).length
+      const open = !request.predictionsClosed && count < PREDICTORS.length && now < request.predictUntil
+      return {
+        kind: 'check',
+        request: requestView(access, request, language),
+        lookups: LOOKUPS.map((source) => {
+          const result = request.lookups.find((item) => item.source === source)
+          return {
+            id: source,
+            label: accessScenario.lookups[source][language],
+            done: Boolean(result),
+            failed: Boolean(result && Object.values(result.layers).includes('failed')),
+          }
+        }),
+        waiting: open
+          ? t(language, `Voorspellingen: ${count} van ${PREDICTORS.length} binnen`, `Predictions: ${count} of ${PREDICTORS.length} in`)
+          : null,
+        predictUntil: request.predictUntil,
+      }
+    }
     default:
       return null
   }
 }
 
-function debriefSummary(access: AccessState, language: Language): AccessPlayPayload['debrief'] {
-  if (access.scene !== 'debrief') return null
-  const overshared = access.policies.some((p) => p.shareFinance)
-  const appropriate = access.requests.some((r) => {
-    const policy = access.policies.find((p) => p.version === r.policyVersion)
-    return policy && policy.shareLoading && !policy.shareFinance
-      && (['load-T-101', 'finance-T-101', 'load-T-102'] as CardId[]).every((id) =>
-        access.requests.some((x) => x.cardId === id && x.policyVersion === policy.version))
-  })
-  return {
-    missionDone: true,
-    appropriateShare: Boolean(appropriate),
-    restoreNeeded: access.revokedOnce && access.restoredOnce,
-    oversharedFinance: overshared,
-    questions: accessScenario.debriefQuestions.map((q) => q[language]),
-  }
-}
-
-function canAct(access: AccessState, role: AccessOrgId, now: string): boolean {
-  if (access.paused) return false
-  if (access.holdUntil && now < access.holdUntil) return false
-  return accessActor(access) === role
-}
-
 function playPayload(access: AccessState, role: AccessOrgId, language: Language, now: string): AccessPlayPayload {
-  const latest = access.dossiers.at(-1) ?? null
-  const policy = currentPolicy(access)
-  const cardIds = Object.keys(accessScenario.cards) as CardId[]
+  const actor = accessActor(access)
+  const canAct = !access.paused && !inHold(access, now) && actor === role
+  const request = activeRequest(access)
+  const isPredictor = (PREDICTORS as readonly string[]).includes(role)
+  const lastResolved = [...access.requests].reverse().find((item) => item.outcome)
+  const own = access.feedbackByRole?.[role]
+  const ownFeedback = own ? { id: `${own.scene}-${own.at}`, text: own.text, ok: own.ok } : null
+  const lastPrediction = lastResolved && isPredictor ? lastResolved.predictions[role as Predictor] ?? null : null
+  const resolvedCount = access.requests.filter((item) => item.finalLayers).length
+  const myScore = isPredictor
+    ? scores(access, language).find((item) => item.role === role)!.points
+    : 0
+  const endedT101 = access.orchestration.some((entry) =>
+    entry.transportId === 'T-101' && entry.carrierOrgId === accessScenario.organizations.consumer.id && entry.status === 'ended')
   return {
     id: access.id,
     version: access.version,
     scene: access.scene,
-    canAct: canAct(access, role, now),
-    waitingFor: canAct(access, role, now) ? null : waitingLabel(access, language),
-    actor: accessActor(access),
+    stage: access.stage,
+    canAct,
+    waitingFor: canAct ? null : waitingLabel(access, language),
+    actor,
     message: access.message,
-    compareExpiredHint: role === 'consumer' || role === 'provider' ? access.compareExpiredHint : null,
-    checks: access.checks,
-    checksLabels: checkLabels(access.checks, language),
-    prompt: promptFor(access, role, language),
-    dossier: role === 'consumer' || role === 'admin' ? {
-      pending: Boolean(latest && latest.decision === 'pending'),
-      latest,
-      cards: accessScenario.dossierCards.map((card) => ({
-        id: card.id,
-        label: card.label[language],
-        included: latest
-          ? (card.id === 'org-identity' ? latest.cards.orgIdentity
-            : card.id === 'representative' ? latest.cards.representative
-              : latest.cards.terms)
-          : false,
-      })),
-    } : null,
-    system: null,
-    credentials: role === 'consumer' && (access.scene === 'authChoose' || access.scene === 'authCheck')
-      ? [
-        { id: accessScenario.credentials.expired.id, label: accessScenario.credentials.expired.label[language], status: 'expired' },
-        { id: accessScenario.credentials.valid.id, label: accessScenario.credentials.valid.label[language], status: 'active' },
-      ]
+    mission: role === 'consumer' && access.scene !== 'debrief' ? accessScenario.missions.consumer[language] : null,
+    task: canAct ? taskFor(access, role, language, now) : null,
+    feedback: ownFeedback,
+    predict: isPredictor && access.scene === 'check' && request
+      ? {
+        requestId: request.id,
+        title: accessScenario.requestCards[request.cardId].title[language],
+        options: OUTCOMES.map((id) => ({ id, label: accessScenario.outcomes[id][language] })),
+        chosen: request.predictions[role as Predictor] ?? null,
+        open: !request.predictionsClosed,
+      }
       : null,
-    selectedCredentialId: access.selectedCredentialId,
-    policy: role === 'owner' ? { shareLoading: policy.shareLoading, shareFinance: policy.shareFinance, version: policy.version } : null,
-    cards: role === 'consumer' && ['involveAsk', 'policyAsk', 'revokeAsk', 'restoreAsk'].includes(access.scene)
-      ? cardIds.filter((id) => access.scene === 'involveAsk' ? id === 'load-T-101' : true).map((id) => {
-        const last = [...access.requests].reverse().find((r) => r.cardId === id)
+    lastResult: lastResolved
+      ? {
+        id: lastResolved.id,
+        number: access.requests.indexOf(lastResolved) + 1,
+        title: accessScenario.requestCards[lastResolved.cardId].title[language],
+        delivered: lastResolved.outcome === 'delivered',
+        reason: requestView(access, lastResolved, language).decision?.reason ?? '',
+        prediction: lastPrediction ? accessScenario.outcomes[lastPrediction][language] : null,
+        correct: lastPrediction ? predictionCorrect(lastPrediction, lastResolved.finalLayers!) : null,
+      }
+      : null,
+    side: sidePanel(access, role, language),
+    received: role === 'consumer'
+      ? access.received.map((item) => {
+        const stale = item.transportId === 'T-101' && endedT101
         return {
-          id,
-          title: accessScenario.cards[id].title[language],
-          asked: Boolean(last),
-          lastAllowed: last ? last.allowed : null,
-          lastReason: last?.reason ?? null,
+          cardId: item.cardId,
+          title: accessScenario.requestCards[item.cardId].title[language],
+          payload: item.payload,
+          label: stale
+            ? t(language, 'Eerder ontvangen · geen nieuwe updates', 'Received earlier · no new updates')
+            : t(language, 'Ontvangen van LogiData', 'Received from LogiData'),
+          stale,
         }
       })
-      : null,
-    received: access.received
-      .filter((item) => role === 'consumer' || role === 'provider' /* host sees via training */)
-      .filter(() => role === 'consumer')
-      .map((item) => ({
-        cardId: item.cardId,
-        title: accessScenario.cards[item.cardId].title[language],
-        payload: item.payload,
-        label: t(language, 'Eerder ontvangen', 'Previously received'),
-      })),
-    proofs: { bvad: Boolean(access.bvad), bvod: Boolean(access.bvodT101) },
-    debrief: debriefSummary(access, language),
+      : [],
+    score: isPredictor ? { points: myScore, of: resolvedCount } : null,
+    debrief: debrief(access, language),
     holdUntil: access.holdUntil,
   }
 }
@@ -354,14 +577,16 @@ export function accessTrainingView(session: SessionState, now: string): AccessTr
   const game = getGame(session.gameId)
   const ready = session.roles.every((role) => role.playerUserId && role.ready)
   const access = session.access
-  const lastRequest = access?.history.filter((h) => h.type === 'request').at(-1)
+  const language = session.language
+  const held = access && inHold(access, now) ? access.history.at(-1)?.frame ?? null : null
+  const actor = access ? accessActor(access) : null
   return {
     sessionId: session.id,
     sessionName: session.name,
     gameId: 'access',
-    gameTitle: game.titles[session.language],
+    gameTitle: game.titles[language],
     code: session.code,
-    language: session.language,
+    language,
     status: session.status,
     paused: session.status === 'paused' || Boolean(access?.paused),
     comparison: false,
@@ -371,9 +596,9 @@ export function accessTrainingView(session: SessionState, now: string): AccessTr
       const def = game.orgs.find((o) => o.id === role.organizationId)!
       return {
         organizationId: role.organizationId,
-        name: def.name[session.language],
-        roleLabel: def.roleLabel[session.language],
-        blurb: def.blurb[session.language],
+        name: def.name[language],
+        roleLabel: def.roleLabel[language],
+        blurb: def.blurb[language],
         claimed: Boolean(role.playerUserId),
         displayName: role.displayName,
         ready: role.ready,
@@ -385,49 +610,19 @@ export function accessTrainingView(session: SessionState, now: string): AccessTr
       id: access.id,
       version: access.version,
       scene: access.scene,
-      message: access.message,
-      compareExpiredHint: access.compareExpiredHint,
-      actor: accessActor(access),
-      checks: access.checks,
-      checksLabels: checkLabels(access.checks, session.language),
-      requestLabel: lastRequest?.frame.requestLabel ?? null,
-      prompt: lastRequest?.frame.prompt ?? promptFor(access, accessActor(access) ?? 'consumer', session.language),
-      policy: currentPolicy(access),
-      members: Object.entries(access.members).map(([organizationId, status]) => {
-        const org = Object.values(accessScenario.organizations).find((o) => o.id === organizationId)
-        return {
-          organizationId,
-          name: org?.name[session.language] ?? organizationId,
-          status: status === 'active'
-            ? t(session.language, 'Actief', 'Active')
-            : t(session.language, 'In behandeling', 'Pending'),
-        }
-      }),
-      orchestration: access.orchestration.map((item) => ({
-        transportId: item.transportId,
-        carrierName: item.carrierOrgId === accessScenario.organizations.consumer.id
-          ? accessScenario.organizations.consumer.name[session.language]
-          : (accessScenario.transports['T-102'].carrierName[session.language]),
-        role: t(session.language, 'Vervoerder', 'Carrier'),
-      })),
-      proofs: {
-        bvad: access.bvad,
-        bvod: access.bvodT101,
-        baseAccess: Boolean(access.baseAccessToken),
-      },
-      flights: buildFlights(access, session.language),
-      received: access.received.map((item) => ({
-        cardId: item.cardId,
-        title: accessScenario.cards[item.cardId].title[session.language],
-        payload: item.payload,
-        label: t(session.language, 'Eerder ontvangen', 'Previously received'),
-      })),
+      stage: access.stage,
+      message: held?.message ?? access.message,
+      actor,
+      actorLabel: actor ? roleTitleShort(actor, language) : null,
+      phases: phases(access, language),
+      card: held?.card ?? liveCard(access, language),
+      network: held?.network ?? networkView(access, language, liveFocus(access)),
+      scores: scores(access, language),
       history: access.history,
-      debrief: debriefSummary(access, session.language),
-      termCards: accessScenario.termCards.map((card) => ({ term: card.term, text: card[session.language] })),
+      debrief: debrief(access, language),
+      termCards: accessScenario.termCards.map((card) => ({ term: card.term, text: card[language] })),
       holdUntil: access.holdUntil,
       metrics: access.metrics,
-      stepTrack: accessStepTrack(access, session.language),
     } : null,
     rounds: [],
     round: null,
@@ -436,35 +631,7 @@ export function accessTrainingView(session: SessionState, now: string): AccessTr
   }
 }
 
-function buildFlights(access: AccessState, language: Language): { id: string; kind: 'proof' | 'data'; from: string; to: string; label: string }[] {
-  const flights: { id: string; kind: 'proof' | 'data'; from: string; to: string; label: string }[] = []
-  if (access.bvad) {
-    flights.push({
-      id: 'bvad',
-      kind: 'proof',
-      from: 'association-register',
-      to: 'provider',
-      label: 'BVAD',
-    })
-  }
-  if (access.bvodT101) {
-    flights.push({
-      id: 'bvod',
-      kind: 'proof',
-      from: 'orchestration-registry',
-      to: 'provider',
-      label: 'BVOD',
-    })
-  }
-  const lastAllowed = [...access.requests].reverse().find((r) => r.allowed)
-  if (lastAllowed) {
-    flights.push({
-      id: `data-${lastAllowed.id}`,
-      kind: 'data',
-      from: 'provider',
-      to: 'consumer',
-      label: accessScenario.cards[lastAllowed.cardId].title[language],
-    })
-  }
-  return flights
+function roleTitleShort(role: AccessOrgId, language: Language): string {
+  const org = accessScenario.organizations[role]
+  return `${org.roleLabel[language]} (${org.name[language]})`
 }

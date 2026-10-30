@@ -2,7 +2,7 @@ import { networkInterfaces } from 'node:os'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { streamSSE } from 'hono/streaming'
-import { GameError, type OrgId } from '@bdi/domain'
+import { GameError, type AccessCardId, type AccessDossierItem, type AccessLookup, type AccessOutcome, type OrgId } from '@bdi/domain'
 import { GameService, userFromAuth, type Store } from './service.js'
 
 export function createApp(store: Store) {
@@ -114,34 +114,32 @@ export function createApp(store: Store) {
     let command: import('@bdi/domain').Command
     switch (kind) {
       case 'submitDossier':
-        command = { type: 'accessSubmitDossier', ...base, orgIdentity: Boolean(body.orgIdentity), representative: Boolean(body.representative), terms: Boolean(body.terms) }
+        command = {
+          type: 'accessSubmitDossier',
+          ...base,
+          items: Array.isArray(body.items) ? body.items.map((item) => String(item) as AccessDossierItem) : [],
+        }
         break
-      case 'dossierDecision':
-        command = { type: 'accessDossierDecision', ...base, decision: body.decision === 'return' ? 'return' : 'commit' }
+      case 'reviewDossier':
+        command = { type: 'accessReviewDossier', ...base, decision: body.decision === 'return' ? 'return' : 'admit' }
         break
-      case 'registerSystem':
-        command = { type: 'accessRegisterSystem', ...base, belongs: Boolean(body.belongs), endpoint: Boolean(body.endpoint), credential: Boolean(body.credential) }
-        break
-      case 'chooseCredential':
-        command = { type: 'accessChooseCredential', ...base, credentialId: body.credentialId === 'cred-expired' ? 'cred-expired' : 'cred-valid' }
-        break
-      case 'checkRequest':
-        command = { type: 'accessCheckRequest', ...base }
-        break
-      case 'registerCarrier':
-        command = { type: 'accessRegisterCarrier', ...base }
-        break
-      case 'checkProofs':
-        command = { type: 'accessCheckProofs', ...base }
+      case 'answer':
+        command = { type: 'accessAnswer', ...base, optionId: String(body.optionId ?? '') }
         break
       case 'setPolicy':
         command = { type: 'accessSetPolicy', ...base, shareLoading: Boolean(body.shareLoading), shareFinance: Boolean(body.shareFinance) }
         break
-      case 'askCard':
-        command = { type: 'accessAskCard', ...base, cardId: body.cardId as 'load-T-101' | 'finance-T-101' | 'load-T-102' }
+      case 'sendRequest':
+        command = { type: 'accessSendRequest', ...base, cardId: String(body.cardId ?? '') as AccessCardId }
+        break
+      case 'lookup':
+        command = { type: 'accessLookup', ...base, source: String(body.source ?? '') as AccessLookup }
+        break
+      case 'decide':
+        command = { type: 'accessDecide', ...base, decision: body.decision === 'deliver' ? 'deliver' : 'refuse' }
         break
       case 'predict':
-        command = { type: 'accessPredict', ...base, guess: body.guess === 'allow' ? 'allow' : 'deny' }
+        command = { type: 'accessPredict', userId, actionId, requestId: String(body.requestId ?? ''), outcome: String(body.outcome ?? '') as AccessOutcome }
         break
       default:
         return c.json({ error: 'unknown', message: 'Onbekende access-actie.' }, 400)

@@ -9,6 +9,8 @@ Dit platform ondersteunt meerdere BDI-games met hetzelfde speelskelet (beamer + 
 | `logistics` | [logistics.md](logistics.md) |
 | `access` | [access.md](access.md) |
 
+Voorstellen voor volgende packs (nog niet gebouwd): [voorstellen.md](voorstellen.md).
+
 ## Nieuw pack toevoegen
 
 1. **Domain** onder `packages/domain/src/games/<id>/`:

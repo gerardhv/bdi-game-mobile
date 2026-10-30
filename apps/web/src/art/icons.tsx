@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 
 export type Org = 'buyer' | 'seller' | 'carrier' | 'delivery'
-export type AccessOrg = 'admin' | 'owner' | 'provider' | 'consumer'
+export type AccessOrg = 'admin' | 'owner' | 'registry' | 'provider' | 'consumer'
 export type AnyOrg = Org | AccessOrg
 
 export const ORG_COLOR: Record<AnyOrg, string> = {
@@ -11,6 +11,7 @@ export const ORG_COLOR: Record<AnyOrg, string> = {
   delivery: '#6b4c9a',
   admin: '#1f6f8b',
   owner: '#c46b2c',
+  registry: '#3d5a80',
   provider: '#6b4c9a',
   consumer: '#2e7d4f',
 }
@@ -108,6 +109,21 @@ export function ConnectorArt() {
   )
 }
 
+export function RegistryArt() {
+  return (
+    <>
+      <Shadow />
+      <rect x="12" y="10" width="40" height="46" rx="6" fill="#3d5a80" />
+      <rect x="18" y="18" width="28" height="4" rx="2" fill="#f4efe4" opacity="0.9" />
+      <rect x="18" y="28" width="22" height="3" rx="1.5" fill="#9eb6d4" />
+      <rect x="18" y="36" width="26" height="3" rx="1.5" fill="#9eb6d4" />
+      <rect x="18" y="44" width="18" height="3" rx="1.5" fill="#9eb6d4" />
+      <circle cx="44" cy="46" r="8" fill="#f2c230" />
+      <path d="M41 46h6M44 43v6" stroke="#1b2a4a" strokeWidth="2" strokeLinecap="round" />
+    </>
+  )
+}
+
 export function RoleIcon({ org, className, label }: { org: string; className?: string; label?: string }) {
   return (
     <Art className={className} label={label}>
@@ -117,6 +133,7 @@ export function RoleIcon({ org, className, label }: { org: string; className?: s
       {org === 'delivery' && <VanArt />}
       {org === 'admin' && <ClipboardArt />}
       {org === 'owner' && <BoxArt arrow="up" />}
+      {org === 'registry' && <RegistryArt />}
       {org === 'provider' && <ConnectorArt />}
       {org === 'consumer' && <TruckArt />}
     </Art>

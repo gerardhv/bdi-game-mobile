@@ -459,12 +459,13 @@ Controleer vóór afronding de teksten en implementatie nog eenmaal inhoudelijk:
 
 Naast de logistieke keten (secties hierboven) hoort een tweede trainingsgame over toegang tot gegevens binnen **één** Association. Die pack deelt lobby, QR-rollen, pauze, tick en persistence met de basisgame, maar heeft een eigen story-reducer. Didactische eisen die leidend zijn:
 
-1. **Onboarding is eenmalig en op organisatieniveau.** Dossier → BVAD. Geen aparte applicatie- of systeemregistratie in deze basisgame. Maak de knip naar de herhalende cyclus **zichtbaar op de beamer** (fasenstrip), niet alleen in tekst.
-2. **Daarna herhaalt zich per handeling, in deze volgorde:** (a) Data Owner legt vast wie betrokken is / gegevens mag ophalen; (b) Data Owner stelt beleid in; (c) Data Consumer authenticatie; (d) verzoek waarbij de Data Service Provider beslist met identiteit, deelname, betrokkenheid en beleid.
-3. **Data Owner vóór authenticatie.** Betrokkenheid en beleid staan vast vóórdat de Data Consumer een digitaal middel kiest en de Data Service Provider authenticatie of data-toegang beoordeelt.
-4. **Beleid en toestemming blijven van de Data Owner.** Intrekken en herstellen van leesrecht gebeurt zonder nieuwe onboarding; eerder ontvangen gegevens blijven gelabeld zichtbaar.
+1. **Onboarding is eenmalig en op organisatieniveau.** Dossier → BVAD en geregistreerde sleutel. Geen aparte applicatie- of systeemregistratie in deze basisgame. Maak de ritmes **zichtbaar op de beamer** (eenmalig, per zending, bij elk verzoek, met tellers), niet alleen in tekst.
+2. **Per zending:** (a) de Data Owner geeft als orkestrator door wie betrokken is; (b) het Orchestration Register legt dat feit vast (BVOD) vóór data sharing; (c) de Data Owner stelt beleid per rol in. Een registratie is een feit, geen toestemming.
+3. **Bij elk verzoek, ná betrokkenheid en beleid:** de Data Consumer stuurt een zelf ondertekend token mee; de Data Service Provider raadpleegt zelf het Association Register (authenticatie en lidmaatschap), het Orchestration Register (BVOD) en het beleid, en beslist lokaal.
+4. **Beleid en toestemming blijven van de Data Owner.** Een vervoerderswissel en een schorsing werken zonder nieuwe onboarding; eerder ontvangen gegevens blijven gelabeld zichtbaar.
+5. **Elke rol neemt echte beslissingen** met uitleg bij een fout antwoord; spelers die niet aan zet zijn voorspellen de uitkomst van elk verzoek.
 
-Rollen in deze pack: Association Admin, Data Owner, Data Service Provider, Data Consumer. Gedetailleerde speelstappen staan in `docs/games/access.md`.
+Rollen in deze pack: Association Admin, Data Owner, Orchestration Register, Data Service Provider, Data Consumer. Gedetailleerde speelstappen staan in `docs/games/access.md`.
 
 ## Potentiële uitbreidingen — niet automatisch uitvoeren
 

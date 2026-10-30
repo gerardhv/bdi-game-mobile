@@ -88,7 +88,68 @@ export type Training = {
   access?: AccessTraining['access']
 }
 
-export type AccessCheckStatus = 'confirmed' | 'failed' | 'pending' | 'unknown'
+export type AccessRole = 'admin' | 'owner' | 'registry' | 'provider' | 'consumer'
+export type AccessPredictor = 'admin' | 'owner' | 'registry' | 'consumer'
+export type AccessLayer = 'identity' | 'membership' | 'involvement' | 'policy'
+export type AccessOutcome = 'delivered' | AccessLayer
+export type AccessLookup = 'association' | 'orchestration' | 'policy'
+export type AccessLine = 'idle' | 'active' | 'ok' | 'failed'
+export type AccessLineStatus = 'ok' | 'failed' | 'pending' | 'skipped' | null
+
+export type AccessCardLine = { label: string; value: string; status: AccessLineStatus }
+
+export type AccessRequestView = {
+  id: string
+  number: number
+  title: string
+  http: string
+  token: { issuer: string; subject: string; audience: string; issuedAt: string; expiresAt: string; fresh: boolean }
+  checks: { id: AccessLayer; label: string; source: string; status: 'pending' | 'ok' | 'failed' | 'skipped'; evidence: string | null }[]
+  predictions: { role: AccessPredictor; roleLabel: string; predicted: boolean; outcomeLabel: string | null; correct: boolean | null }[]
+  predictionsOpen: boolean
+  decision: null | { delivered: boolean; reason: string; payload: string | null }
+  wrong: string | null
+}
+
+export type AccessCard = {
+  kind: 'question' | 'request' | 'info'
+  role: AccessRole | null
+  title: string
+  news: string | null
+  prompt: string | null
+  lines: AccessCardLine[]
+  options: { id: string; label: string; state: 'idle' | 'wrong' | 'right' }[]
+  feedback: string | null
+  feedbackOk: boolean | null
+  request: AccessRequestView | null
+}
+
+export type AccessNetwork = {
+  delta: { status: 'none' | 'pending' | 'active' | 'suspended'; statusLabel: string; keyRegistered: boolean }
+  orchestration: { transportId: string; carrier: string; isDelta: boolean; status: 'active' | 'ended' }[]
+  policy: { version: number; shareLoading: boolean; shareFinance: boolean }
+  lines: Record<'onboard' | 'register' | 'request' | 'association' | 'orchestration' | 'policy' | 'data', AccessLine>
+  requestLabel: string | null
+  dataLabel: string | null
+  highlight: AccessRole | null
+}
+
+export type AccessFrame = {
+  scene: string
+  actor: AccessRole | null
+  message: string | null
+  card: AccessCard
+  network: AccessNetwork
+}
+
+export type AccessDebrief = {
+  missions: { label: string; ok: boolean }[]
+  counts: { label: string; value: number }[]
+  scores: { role: AccessPredictor; roleLabel: string; points: number; of: number }[]
+  mistakes: { role: AccessRole; roleLabel: string; count: number }[]
+  rules: { title: string; text: string; seen: boolean }[]
+  questions: string[]
+}
 
 export type AccessTraining = Omit<Training, 'gameId' | 'round' | 'rounds' | 'access'> & {
   gameId: 'access'
@@ -98,19 +159,18 @@ export type AccessTraining = Omit<Training, 'gameId' | 'round' | 'rounds' | 'acc
     id: string
     version: number
     scene: string
+    stage: number
     message: string | null
-    compareExpiredHint: string | null
-    actor: string | null
-    checks: Record<string, AccessCheckStatus>
-    checksLabels: { id: string; label: string; status: AccessCheckStatus; statusLabel: string }[]
-    requestLabel: string | null
-    prompt: string | null
-    policy: { shareLoading: boolean; shareFinance: boolean; version: number }
-    members: { organizationId: string; name: string; status: string }[]
-    orchestration: { transportId: string; carrierName: string; role: string }[]
-    proofs: { bvad: unknown; bvod: unknown; baseAccess: boolean }
-    flights: { id: string; kind: 'proof' | 'data'; from: string; to: string; label: string }[]
-    received: { cardId: string; title: string; payload: string; label: string }[]
+    actor: AccessRole | null
+    actorLabel: string | null
+    phases: {
+      bands: { id: 'once' | 'shipment' | 'request'; who: string; rhythm: string; countLabel: string; active: boolean; current: string | null }[]
+      debrief: boolean
+      debriefLabel: string
+    }
+    card: AccessCard
+    network: AccessNetwork
+    scores: AccessDebrief['scores']
     history: {
       sequence: number
       at: string
@@ -119,34 +179,12 @@ export type AccessTraining = Omit<Training, 'gameId' | 'round' | 'rounds' | 'acc
       type: string
       text: string
       result: string | null
-      frame: {
-        prompt: string | null
-        message: string | null
-        actor: string | null
-        checks: Record<string, AccessCheckStatus>
-        requestLabel: string | null
-        options: Option[]
-        selectedOptionId: string | null
-        feedback: string | null
-        feedbackOk: boolean | null
-      }
+      frame: AccessFrame
     }[]
-    debrief: null | {
-      missionDone: boolean
-      appropriateShare: boolean
-      restoreNeeded: boolean
-      oversharedFinance: boolean
-      questions: string[]
-    }
+    debrief: AccessDebrief | null
     termCards: { term: string; text: string }[]
     holdUntil: string | null
     metrics: Metrics
-    stepTrack: {
-      phase: 'once' | 'repeat'
-      onceLabel: string
-      repeatLabel: string
-      steps: { id: string; band: 'once' | 'repeat'; label: string; status: 'done' | 'active' | 'todo' }[]
-    }
   }
 }
 
@@ -196,40 +234,65 @@ export type Player = {
   roleLabel?: string
 }
 
+export type AccessTask =
+  | { kind: 'dossier'; prompt: string; news: string | null; items: { id: string; label: string }[]; selected: string[] }
+  | { kind: 'question'; prompt: string; news: string | null; lines: AccessCardLine[]; options: { id: string; label: string; wrong: boolean }[] }
+  | { kind: 'policy'; prompt: string; news: string | null; shareLoading: boolean; shareFinance: boolean }
+  | { kind: 'pick'; prompt: string; news: string | null; cards: { id: string; title: string; note: string }[] }
+  | {
+    kind: 'check'
+    request: AccessRequestView
+    lookups: { id: AccessLookup; label: string; done: boolean; failed: boolean }[]
+    waiting: string | null
+    predictUntil: string
+  }
+
 export type AccessPlayer = Omit<Player, 'gameId' | 'round' | 'access' | 'role'> & {
   gameId: 'access'
-  role: string
+  role: AccessRole
   roleLabel: string
   round?: never
   access: null | {
     id: string
     version: number
     scene: string
+    stage: number
     canAct: boolean
     waitingFor: string | null
-    actor: string | null
+    actor: AccessRole | null
     message: string | null
-    compareExpiredHint: string | null
-    checks: Record<string, AccessCheckStatus>
-    checksLabels: { id: string; label: string; status: AccessCheckStatus; statusLabel: string }[]
-    prompt: string | null
-    dossier: null | {
-      pending: boolean
-      latest: { version: number; complete: boolean; decision: string; cards: { orgIdentity: boolean; representative: boolean; terms: boolean } } | null
-      cards: { id: string; label: string; included: boolean }[]
+    mission: string | null
+    task: AccessTask | null
+    feedback: { id: string; text: string; ok: boolean } | null
+    predict: null | {
+      requestId: string
+      title: string
+      options: { id: AccessOutcome; label: string }[]
+      chosen: AccessOutcome | null
+      open: boolean
     }
-    system: null | { checks: { id: string; label: string; done: boolean }[]; registered: boolean }
-    credentials: null | { id: string; label: string; status: string }[]
-    selectedCredentialId: string | null
-    policy: null | { shareLoading: boolean; shareFinance: boolean; version: number }
-    cards: null | { id: string; title: string; asked: boolean; lastAllowed: boolean | null; lastReason: string | null }[]
-    received: { cardId: string; title: string; payload: string; label: string }[]
-    proofs: { bvad: boolean; bvod: boolean }
-    debrief: AccessTraining['access'] extends null | infer A ? A extends { debrief: infer D } ? D : null : null
+    lastResult: null | {
+      id: string
+      number: number
+      title: string
+      delivered: boolean
+      reason: string
+      prediction: string | null
+      correct: boolean | null
+    }
+    side: {
+      title: string
+      rows: { label: string; value: string; tone: 'ok' | 'bad' | 'muted' | null }[]
+      log: string[]
+      note: string | null
+    }
+    received: { cardId: string; title: string; payload: string; label: string; stale: boolean }[]
+    score: { points: number; of: number } | null
+    debrief: AccessDebrief | null
     holdUntil: string | null
   }
 }
 
 export const CONFIRM_STEPS = new Set(['S03', 'S07', 'S09', 'S11', 'S13', 'S17', 'S19'])
 export const ORGS: Org[] = ['buyer', 'seller', 'carrier', 'delivery']
-export const ACCESS_ORGS = ['admin', 'owner', 'provider', 'consumer'] as const
+export const ACCESS_ORGS = ['admin', 'owner', 'registry', 'provider', 'consumer'] as const

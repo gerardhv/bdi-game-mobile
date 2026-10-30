@@ -211,7 +211,7 @@ export function Host() {
     >
       <header className="hud-top">
         <Wordmark light />
-        {view.sessionName && view.sessionName !== 'BDI Game' && <strong className="hud-name">{view.sessionName}</strong>}
+        {view.sessionName && view.sessionName !== 'BDI Games' && view.sessionName !== 'BDI Game' && <strong className="hud-name">{view.sessionName}</strong>}
         {accessActive ? (
           <span className="hud-pill round-bdi">{view.gameTitle}</span>
         ) : round ? (

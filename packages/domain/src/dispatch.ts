@@ -482,15 +482,13 @@ export function dispatch(session: SessionState, command: Command, ctx: Ctx): { s
     case 'updateLanguage':
       return { state, output: updateLanguage(state, command) }
     case 'accessSubmitDossier':
-    case 'accessDossierDecision':
-    case 'accessRegisterSystem':
-    case 'accessChooseCredential':
-    case 'accessCheckRequest':
-    case 'accessRegisterCarrier':
-    case 'accessCheckProofs':
+    case 'accessReviewDossier':
+    case 'accessAnswer':
     case 'accessSetPolicy':
-    case 'accessAskCard':
+    case 'accessSendRequest':
     case 'accessPredict':
+    case 'accessLookup':
+    case 'accessDecide':
       return { state, output: reduceAccess(state, command, ctx) }
     default:
       throw new GameError('unknown', 'Onbekende actie.', 400)
